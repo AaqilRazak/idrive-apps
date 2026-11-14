@@ -135,7 +135,9 @@ const CAR = {
     'de.bmw.infotainment.KombiIF': { statusRangeTankStatus: { fluidLevelFuelTank: 27, range: 494, mileageKilometre: 23581 },
         displayRangeElectricVehicle: { displayRangeElectricVehicle: 39 }, statusBordcomputerTravelData: { wayPassed: 113 },
         statusBordcomputerAverage: { speedAverage1BC1: 360, consumptionAverage1BC1: 441, statusUnitOfMeasurementSpeedBC: 'MPH__MLS', statusUnitOfMeasurementConsumptionBC: 2 } },
-    'de.bmw.infotainment.drivingexcitement.Efficiencytainment2': { statusChargeOfBatteryHybrid: { displayChargingConditionHighVoltageStorage: 71 } },
+    'de.bmw.infotainment.drivingexcitement.Efficiencytainment2': { statusChargeOfBatteryHybrid: { displayChargingConditionHighVoltageStorage: 71 },
+        statusPowerRelativHybrid: { displayActualValuePowerRelativeDrivingElectric: 40, displayActualValuePowerRelativeRecuperation: 0 } },
+    'com.harman.infotainment.systeminfrastructure.environment.levelmonitor.LevelMonitor': { systemVoltage: { simuState: false, value: 14080 } },
     'de.bmw.infotainment.vehicle.TPMS': { statusTyrePressure: { actualValuePressureTyreFLH: 362, actualValuePressureTyreFRH: 362, actualValuePressureTyreRLH: 391, actualValuePressureTyreRRH: 65535 },
         statusTyreTemperature: { actualValueTemperatureTyreFLH: 110, actualValueTemperatureTyreFRH: 112, actualValueTemperatureTyreRLH: 107, actualValueTemperatureTyreRRH: 109 } },
     'de.bmw.infotainment.vehicle.Vehicle': { statusNewCurrentUnitsStatusExt: { unitOfMeasurementAirPressure: 'PSI', unitOfMeasurementTemperature: 'C' } },
@@ -144,7 +146,7 @@ const subscribers = {};
 function notify(iface, field, value) { (subscribers[iface + '.' + field] || []).forEach((cb) => cb(value)); }
 const someipBuilders = {
     buildTypedProxy(iface, instance) {
-        assert.strictEqual(instance, '1');
+        assert.strictEqual(instance, /LevelMonitor$/.test(iface) ? 'Inst1' : '1', iface + '\'s instance');
         const p = { init: () => Promise.resolve(), waitUntilAvailable: () => Promise.resolve() };
         if (iface === 'de.bmw.infotainment.vehicle.Vehicle2') {
             p.statusCarSpeed2 = { getValue: () => Promise.resolve({ speedVehicleCentreOfGravity: speedRaw }),
@@ -370,6 +372,9 @@ async function main() {
     assert.strictEqual(g.engineHp, 84, 'power from torque (200 Nm) and rpm');
     assert.strictEqual(g.boostBar, 1.2);
     assert.strictEqual(g.fuelL, 27);
+    assert.strictEqual(g.fuelPct, 68, '27 of the 330e\'s 40 l');
+    assert.strictEqual(g.elecHp, 44, '40 % of the e-motor\'s 109 hp');
+    assert.strictEqual(g.volts12, 14.1, 'the supply in mV');
     assert.strictEqual(g.rangeKm, 494);
     assert.strictEqual(g.odoKm, 23581);
     assert.strictEqual(g.evRangeKm, 39);

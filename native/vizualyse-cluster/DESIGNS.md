@@ -22,7 +22,7 @@ drawn and their limits: [THEMES.md](THEMES.md). The proof:
   drawn: [docs/panel-zones.png](docs/panel-zones.png), numbers in
   `theme_core.PANEL`). Everything is visible to the top edge in the middle,
   except:
-  - **the gear window**, x 1366-1462, y 665-720: never drawn (cut out of
+  - **the gear window**, x 1385-1462, y 665-720: never drawn (cut out of
     the art by the build). The car's gear readout shows through it;
     covering it brings up the KOMBI's black fallback gear box.
   - **warning lights**, drawn by the car over the theme: the left column

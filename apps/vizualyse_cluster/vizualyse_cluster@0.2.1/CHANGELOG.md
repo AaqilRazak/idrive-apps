@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+- The fuel gauge: litres as a share of the 330e's 40 l tank.
+- Electric power: the e-motor's drive and regen (relative, taken as %, of
+  its 109 hp; unconfirmed), and the powertrain's power read raw to learn
+  its scaling.
+- 12 V: the head unit's supply voltage (LevelMonitor `systemVoltage`,
+  instance `Inst1`; a little under the battery's), its unit from its size.
+- The manifest asks for those three fields too (21 in all, checked against
+  our unit's catalog).
+
 ## 0.2.0
 
 - **The car's readings on the cluster**: the app reads the car over SOME/IP

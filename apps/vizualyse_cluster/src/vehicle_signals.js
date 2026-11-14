@@ -129,6 +129,7 @@ const READINGS = [
         take(v, s) {
             const f = num(v.fluidLevelFuelTank), r = num(v.range), o = num(v.mileageKilometre);
             s.fuelL = f == null || f >= 255 ? null : f;
+            s.fuelPct = s.fuelL == null ? null : Math.min(100, Math.round(s.fuelL / TANK_L * 100));
             s.rangeKm = r == null || r >= 4095 ? null : r;
             s.odoKm = o == null || o >= 16777215 ? null : o;
         } },
@@ -160,7 +161,32 @@ const READINGS = [
             if (s._tempUnit === 0 || s._tempUnit === 3) s._tempUnit = null;
             tyres(s);
         } },
+    /* the electric motor's drive and regen, relative to its maximum
+     * (UInt8: taken as %, unconfirmed), as hp of the car's e-motor */
+    { iface: 'de.bmw.infotainment.drivingexcitement.Efficiencytainment2', field: 'statusPowerRelativHybrid', access: 'rs', sure: false,
+        take(v, s) {
+            const d = num(v.displayActualValuePowerRelativeDrivingElectric), r = num(v.displayActualValuePowerRelativeRecuperation);
+            const ok = (x) => x != null && x <= 100;
+            s.elecHp = !ok(d) && !ok(r) ? null : Math.round(((ok(d) ? d : 0) - (ok(r) ? r : 0)) / 100 * ELECTRIC_MAX_HP);
+        } },
+    /* the whole powertrain's power, as the car's Sport display shows it:
+     * read only to learn its scaling (logged raw), not shown yet */
+    { iface: FES, field: 'displaySportPowertrain', access: 's', sure: false,
+        take(v, s) { s._powertrain = num(v.displaySportPowerPowertrain); } },
+    /* 12 V: the head unit's own supply (it hangs on the 12 V system, a
+     * little under the battery); Int16, its unit from its size */
+    { iface: 'com.harman.infotainment.systeminfrastructure.environment.levelmonitor.LevelMonitor', inst: 'Inst1', field: 'systemVoltage', access: 'rs', poll: POLL_MS, sure: false,
+        take(v, s) { s.volts12 = volts(num(v.value)); } },
 ];
+/* the 330e's: an 80 kW (109 hp) motor, a 40 l tank (the owner's car; a
+ * setting once the themes run on other cars) */
+const ELECTRIC_MAX_HP = 109;
+const TANK_L = 40;
+function volts(raw) {
+    if (raw == null || raw <= 0) return null;
+    const v = raw > 1000 ? raw / 1000 : raw > 100 ? raw / 10 : raw;   /* mV, 0.1 V or V */
+    return v >= 6 && v <= 18 ? round(v, 1) : null;
+}
 function power(s) {
     if (s._torqueNm === undefined) return;
     s.engineHp = s._torqueNm == null || s.rpm == null ? null : Math.max(0, Math.round(s._torqueNm * s.rpm / 9549 * 1.341));
@@ -175,7 +201,7 @@ function tyres(s) {
 function manifestProxies() {
     const out = {};
     READINGS.filter((r) => r.manifest !== false).forEach((r) => {
-        const p = out[r.iface] = out[r.iface] || { instances: ['1'], attributes: {} };
+        const p = out[r.iface] = out[r.iface] || { instances: [r.inst || '1'], attributes: {} };
         p.attributes[r.field] = r.access;
     });
     return out;
@@ -215,7 +241,7 @@ function watch(someipBuilders, log, onSignals) {
     let up = 0;
     Object.keys(byIface).forEach((iface) => {
         let proxy = null;
-        native(() => someipBuilders.buildTypedProxy(iface, '1'))
+        native(() => someipBuilders.buildTypedProxy(iface, byIface[iface][0].inst || '1'))
             .then((p) => { proxy = p; return native(() => p.init()); })
             /* each interface waits for its own provider: one that never comes holds up nothing else */
             .then(() => (proxy.waitUntilAvailable ? proxy.waitUntilAvailable() : null))

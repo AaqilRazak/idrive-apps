@@ -246,13 +246,13 @@
    "h": 616,
    "sampling": "nearest",
    "file": "g20i2c.art.tiles.gz",
-   "sha1": "3d2686d442debc8adbdd8eac93e6913cb01fe052",
+   "sha1": "a8213b4e26559f512677e0c8421200d4644ba8ee",
    "tile": 4,
    "map": [
     240,
     180
    ],
-   "tiles": 11463
+   "tiles": 11464
   },
   "speedField": {
    "format": "rgba8",

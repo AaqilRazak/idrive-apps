@@ -67,15 +67,18 @@ comes from and how it is scaled: [knowledge/vehicle-signals.md](../../knowledge/
 | `engineHp` | `FES.statusActualValueTorque2` x rpm |
 | `boostBar`*, `throttle`* | `FES.statusSwitchDriveDynamicSport2`, `AcceleratorPedal` |
 | `outsideC` | `EnvironmentalInformation.ExteriorTemperature` |
-| `fuelL`, `rangeKm`, `odoKm` | `KombiIF.statusRangeTankStatus` |
+| `fuelL`, `fuelPct`, `rangeKm`, `odoKm` | `KombiIF.statusRangeTankStatus` (`fuelPct`: litres of the 330e's 40 l tank) |
 | `evRangeKm`*, `socPct`* | `KombiIF.displayRangeElectricVehicle`, `Efficiencytainment2.statusChargeOfBatteryHybrid` |
+| `elecHp`* | `Efficiencytainment2.statusPowerRelativHybrid`: drive minus regen, as % of the 330e's 109 hp e-motor |
+| `volts12`* | `LevelMonitor.systemVoltage` (instance `Inst1`): the head unit's supply, a little under the battery |
 | `tripKm`*, `avgKmh`*, `avgL100`* | `KombiIF` trip computer (its own units converted) |
 | `tyres` | `TPMS` pressures and temperatures, in the car's units (`Vehicle`'s units status, else from the size) |
 
 \* a scaling not yet checked against the car: the raw value is logged once
-(`signals: <field> raw ...`). The theme's fuel gauge wants `fuelPct`; the
-car gives litres, so it shows `--` until the tank's size is known. Not read
-yet: the speed limit, cruise speed, navigation, electric power.
+(`signals: <field> raw ...`). `FES.displaySportPowertrain` (the
+powertrain's power) is read only for that log. The tank and the e-motor are
+the 330e's (constants in `vehicle_signals.js`) until the themes run on other
+cars. Not read yet: the speed limit, cruise speed, navigation.
 
 Before a manifest change goes to the car: `node tools/check_signals.js
 <someip-interfaces.json>` against the unit's catalog (BMW's installer
@@ -94,7 +97,7 @@ second, `speed`.
 
 ## Building and testing
 
-- `node tools/make_page.js vizualyse_cluster@0.2.0` writes `application.xml`
+- `node tools/make_page.js vizualyse_cluster@0.2.1` writes `application.xml`
   and `uiDescription.json` from one list; `node tools/make_icon.js <png>`
   the tile icon (a gauge).
 - `node tools/test_page.js` runs the app against a fake SDK, HMI and tool

@@ -61,7 +61,9 @@ Measured on one unit (head unit software `I_21w12.2-1-4`) unless a line says oth
   but unexplained.
 - **Only the strip's gear readout matters** (measured 2026-11-14, white
   rectangles on the panel): white over all of y 0-665 and over the strip
-  everywhere except **x 1366-1462, y 665-720** brought no box; covering
+  everywhere except **x 1366-1462, y 665-720** brought no box (later
+  narrowed to **1385-1462**, black, so the drive mode word left of the gear,
+  "Sport Xtra Boost", is covered: still no box); covering
   any of that window (white to y 670 across, or the window narrowed from
   either side) brought it. The gear's plate itself draws over the panel up
   to about y 648. Photos: `native/vizualyse-cluster/docs/`; the numbers:

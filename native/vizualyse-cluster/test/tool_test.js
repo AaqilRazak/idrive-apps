@@ -178,9 +178,15 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     await wait(300);
     const before2 = ops.length;
     send({ cmd: 'mode', mode: 'sport' });
-    await until(() => ops.slice(before2).filter((m) => m.op === 'layer').length === nLayers, 3000, 'the Sport theme');
-    await wait(300);
+    const curtainOp = (m) => m.op === 'layer' && m.z === -1000;
+    await until(() => ops.slice(before2).filter((m) => m.op === 'layer' && !curtainOp(m)).length === nLayers, 3000, 'the Sport theme');
+    await wait(800);
     const sw = ops.slice(before2);
+    /* a curtain (black, under everything, the gear window open) while the switch runs, dropped after */
+    const curtain = sw.filter(curtainOp).map((m) => m.ref);
+    assert.strictEqual(curtain.length, 3, 'a curtain of 3 rects during the switch');
+    assert.ok(sw.findIndex(curtainOp) < sw.findIndex((m) => m.op === 'drop'), 'the curtain goes up before the old layers go');
+    curtain.forEach((r) => assert.ok(sw.some((m) => m.op === 'drop' && m.ref === r), 'the curtain is dropped after'));
     assert.ok(!sw.some((m) => m.op === 'asset' || m.op === 'frame'), 'a switch within a family sends no shared texture');
     assert.ok(!sw.some((m) => m.op === 'drop' && assets.some((a) => a.ref === m.ref)), 'the shared textures stay');
     console.log('ok   Comfort to Sport in a family: ' + nLayers + ' layers made again, no texture sent');

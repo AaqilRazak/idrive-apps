@@ -105,7 +105,8 @@
       "attributes": {
         "statusFESVehicleDynamicSwitchHMI": "rs",
         "statusActualValueTorque2": "rs",
-        "statusSwitchDriveDynamicSport2": "rs"
+        "statusSwitchDriveDynamicSport2": "rs",
+        "displaySportPowertrain": "s"
       }
     },
     "de.bmw.powertrain.AcceleratorPedal": {
@@ -132,7 +133,8 @@
         "1"
       ],
       "attributes": {
-        "statusChargeOfBatteryHybrid": "rs"
+        "statusChargeOfBatteryHybrid": "rs",
+        "statusPowerRelativHybrid": "rs"
       }
     },
     "de.bmw.infotainment.vehicle.TPMS": {
@@ -142,6 +144,14 @@
       "attributes": {
         "statusTyrePressure": "rs",
         "statusTyreTemperature": "rs"
+      }
+    },
+    "com.harman.infotainment.systeminfrastructure.environment.levelmonitor.LevelMonitor": {
+      "instances": [
+        "Inst1"
+      ],
+      "attributes": {
+        "systemVoltage": "rs"
       }
     }
   },

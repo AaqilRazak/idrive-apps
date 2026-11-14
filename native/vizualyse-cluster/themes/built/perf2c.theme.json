@@ -321,13 +321,13 @@
    "h": 964,
    "sampling": "nearest",
    "file": "perf2c.art.tiles.gz",
-   "sha1": "e4728296117c9573da656b7ee102536ea8845445",
+   "sha1": "3a5745a04a7e823ab72454a6bb4947c2dbae331c",
    "tile": 4,
    "map": [
     240,
     180
    ],
-   "tiles": 18985
+   "tiles": 18984
   },
   "speedField": {
    "format": "rgba8",

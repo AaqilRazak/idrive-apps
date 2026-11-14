@@ -36,7 +36,7 @@
      *               from (0, y) to (x, 0) on the left, (1920 - x, 0) to
      *               (1920, y) on the right; nothing moving above it. */
     const PANEL = {
-        gearWindow: [1366, 665, 96, 55],
+        gearWindow: [1385, 665, 77, 55],
         keepOut: [
             { what: 'the gear readout', r: [1356, 640, 116, 80] },
             { what: 'the warning lights on the left', r: [0, 200, 120, 270] },

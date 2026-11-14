@@ -51,7 +51,7 @@ READINGS.forEach((r) => {
     const p = manifest.proxies[r.iface];
     if (p === '*') return;
     if (!p || !p.attributes || p.attributes[r.field] !== r.access) bad.push('vehicle_signals.js reads ' + r.iface + '.' + r.field + ' ("' + r.access + '"), the manifest asks ' + JSON.stringify(p && p.attributes && p.attributes[r.field]));
-    if (p && Array.isArray(p.instances) && p.instances.indexOf('1') < 0) bad.push(r.iface + ': instance 1 not asked for');
+    if (p && Array.isArray(p.instances) && p.instances.indexOf(r.inst || '1') < 0) bad.push(r.iface + ': instance ' + (r.inst || '1') + ' not asked for');
 });
 if (bad.length) { bad.forEach((b) => console.log('FAIL ' + b)); process.exit(1); }
 console.log('ok   ' + fields + ' fields on ' + Object.keys(manifest.proxies).filter((k) => manifest.proxies[k].attributes).length +

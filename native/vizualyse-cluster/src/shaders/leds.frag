@@ -7,7 +7,14 @@
 // change at two steps of the fill. Version 2: the lights lean (a shear) and
 // the row can have a wider gap in its middle. Flashing is the tool's toggle,
 // not a clock here.
+// highp where the GPU has it, as the other shaders: in mediump (16-bit on
+// the KOMBI) the lights came out as a flickering speckle (2026-11-14), and
+// the distance below is kept small enough not to overflow 16 bits either.
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 uniform vec4 u_led;     // x count n, y lit (steps of the fill), z 0 normal / 1 all flash colour / 2 all off, w mode
 uniform vec4 u_geom;    // x layer width px, y layer height px, z light width px, w light height px
 uniform vec4 u_split;   // x first step in u_c1, y first step in u_c2, z corner radius px, w halo px
@@ -34,7 +41,9 @@ void main() {
     float step_ = u_led.w > 0.5 ? min(i, n - 1.0 - i) : i;
     vec2 p = vec2(gapped - (i + 0.5) * cw, (v_uv.y - 0.5) * u_geom.y);
     vec2 half_ = vec2(u_geom.z, u_geom.w) * 0.5 - u_split.z;
-    vec2 q = abs(p) - half_;
+    /* clamped: far from its light a pixel draws nothing anyway, and a
+     * squared distance past 255 would overflow 16-bit floats */
+    vec2 q = min(abs(p) - half_, vec2(64.0));
     float sd = gapped < 0.0 ? 99.0 : length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - u_split.z;
     float body = clamp(0.5 - sd, 0.0, 1.0);
 

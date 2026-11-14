@@ -48,17 +48,30 @@ const ids = rt.list().filter((t) => {
     return JSON.parse(fs.readFileSync(path.join(DIR, t.id + '.theme.json'), 'utf8')).ship !== false;
 }).map((t) => t.id).sort();
 assert(ids.length >= 16, 'the shipped themes: ' + ids.length);
-let switches = 0;
-ids.forEach((a) => ids.forEach((b) => {
-    if (a === b) return;
-    rt.start(a);
-    rt.cover = true;
-    rt.start(b);
-    switches++;
-}));
-rt.stop();
-assert.deepStrictEqual(f.st.refused, [], 'refused by cluster-render: ' + f.st.refused.length);
-assert.deepStrictEqual(f.st.badBinds, [], 'binds to assets that are not alive');
-assert.deepStrictEqual(f.alive(), { assets: 0, layers: 0 }, 'everything dropped at the end');
-console.log('ok   ' + switches + ' switches between ' + ids.length + ' themes: at most ' + f.st.peakAssets + ' assets (limit ' + MAX_ASSETS +
-    ') and ' + f.st.peakLayers + ' layers (limit ' + MAX_LAYERS + ') alive; every bind to a live asset');
+/* the curtain (theme_runtime.js start) lifts once the client's frames have
+ * gone: the fake has none, so after a few of these ms */
+rt.liftMs = 1;
+const lifted = () => new Promise((ok) => { const t = setInterval(() => { if (!(rt.curtains || []).length) { clearInterval(t); ok(); } }, 2); });
+(async () => {
+    let switches = 0, curtained = 0;
+    for (const a of ids) {
+        for (const b of ids) {
+            if (a === b) continue;
+            rt.start(a);
+            await lifted();
+            rt.cover = true;
+            rt.start(b);
+            /* black under the new theme, so the panel is never empty and BMW's cluster can't show */
+            if ((rt.curtains || []).length === 3) curtained++;
+            await lifted();
+            switches++;
+        }
+    }
+    rt.stop();
+    assert.deepStrictEqual(f.st.refused, [], 'refused by cluster-render: ' + f.st.refused.length);
+    assert.deepStrictEqual(f.st.badBinds, [], 'binds to assets that are not alive');
+    assert.deepStrictEqual(f.alive(), { assets: 0, layers: 0 }, 'everything dropped at the end');
+    assert.strictEqual(curtained, switches, 'every switch had its curtain');
+    console.log('ok   ' + switches + ' switches between ' + ids.length + ' themes: at most ' + f.st.peakAssets + ' assets (limit ' + MAX_ASSETS +
+        ') and ' + f.st.peakLayers + ' layers (limit ' + MAX_LAYERS + ') alive; every bind to a live asset; a curtain under every switch, lifted after');
+})().catch((e) => { console.error(e); process.exit(1); });

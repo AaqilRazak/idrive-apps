@@ -51,6 +51,50 @@ class ThemeRuntime {
      * whose pixels and shape the new theme has too: only the rest go over
      * the link again. */
     start(id) {
+        /* A switch (Sport and Comfort, Try, another family) keeps the panel
+         * covered: black under everything while the old layers go and the
+         * new ones come, then dropped. With no layer the panel lingered for
+         * a moment and BMW's cluster showed through (2026-11-14). The
+         * curtain leaves the gear window open, as every theme does. */
+        const curtain = this.theme ? this._curtain() : [];
+        try { return this._start(id); }
+        finally { this._lift(curtain); }
+    }
+
+    /* The curtain stays until the new theme's textures have left (the
+     * client's frame queue empty, the socket not blocked) and a little
+     * after, at most 4 s: the art draws nothing until its pixels arrive. */
+    _lift(refs) {
+        if (!refs.length) return;
+        this.curtains = (this.curtains || []).concat(refs);
+        const t0 = Date.now(), cr = this.cr;
+        const busy = () => (cr.pendingFrames && cr.pendingFrames.size > 0) || !!cr.blocked;
+        let calm = 0;
+        const timer = setInterval(() => {
+            calm = busy() ? 0 : calm + 1;
+            if (calm < 3 && Date.now() - t0 < 4000) return;
+            clearInterval(timer);
+            this.liftTimers = (this.liftTimers || []).filter((x) => x !== timer);
+            refs.forEach((r) => { cr.drop(r); });
+            this.curtains = this.curtains.filter((r) => refs.indexOf(r) < 0);
+        }, this.liftMs || 100);
+        this.liftTimers = (this.liftTimers || []).concat(timer);
+    }
+
+    _curtain() {
+        const gw = core.PANEL.gearWindow, fsrc = fs.readFileSync(path.join(this.dir, 'fs_rect.frag'), 'utf8');
+        return [[0, 0, 1920, gw[1]], [0, gw[1], gw[0], 720 - gw[1]], [gw[0] + gw[2], gw[1], 1920 - gw[0] - gw[2], 720 - gw[1]]].map((r) => {
+            const ref = this.cr.effect({ target: TARGET, klass: 'content', z: -1000, x: r[0], y: r[1], w: r[2], h: r[3], fs: fsrc });
+            if (ref) {
+                this._uniform(ref, 'u_color', [0, 0, 0, 1]);
+                this._uniform(ref, 'u_shape', [r[2], r[3], 0, 0]);
+                this._uniform(ref, 'u_ring', [0, 0, 0, 0]);
+            }
+            return ref;
+        }).filter(Boolean);
+    }
+
+    _start(id) {
         const keep = this._release();
         if (!/^[a-z0-9]+$/.test(id || '')) { this._dropAll(keep); throw new Error('no theme ' + id); }
         let theme, logic;
@@ -186,6 +230,10 @@ class ThemeRuntime {
     }
 
     stop() {
+        (this.liftTimers || []).forEach(clearInterval);
+        this.liftTimers = [];
+        (this.curtains || []).forEach((r) => this.cr.drop(r));
+        this.curtains = [];
         if (!this.theme && !Object.keys(this.refs.assets).length && !Object.keys(this.refs.layers).length) return;
         this._dropAll(this._release());
     }

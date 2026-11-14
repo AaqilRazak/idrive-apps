@@ -6,7 +6,7 @@
 Whole-cluster themes for the iDrive 7 instrument cluster (1920x720), drawn
 through cluster-render's `panel` target: over BMW's gauges and its bottom
 strip, under the car's own warning lights. The car's gear readout shows
-through a window in the strip (x 1366-1462, y 665-720): covering it brings
+through a window in the strip (x 1385-1462, y 665-720): covering it brings
 up the KOMBI's black fallback gear box (`theme_core.PANEL`, DESIGNS.md
 "The car's panel").
 Each comes as a Sport and a Comfort theme, switched by the car's drive mode.
