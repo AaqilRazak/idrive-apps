@@ -31,6 +31,12 @@ Measured on one unit (head unit software `I_21w12.2-1-4`) unless a line says oth
   gauges at once (scene 0x10004f8 on slot 0x203), effect shaders compiled
   by the unit's glslang, layers to y 720 covered the bottom strip and the
   car's own telltales (P, seatbelt) still showed over it.
+- **16 assets a client, refused after the fact** (2026-11-14): over the
+  limit the client still hands out a ref and the server refuses it, so the
+  layers bound to it draw nothing, silently. A theme switch that made the
+  new theme's 12 assets before dropping the last theme's lost the last ones
+  made (tri2's glyph atlases: no text). Drop what isn't kept first
+  (`theme_runtime.js`; `test/switch_test.js` switches every pair).
 - **cluster-render's matrix uniforms are reserved:** a fragment shader that
   declares `u_mvp`, `u_mv`, `u_m`, `u_v`, `u_p` or `u_normal` as anything but
   `mat4` is refused on the car ("effect did not compile"); WebGL accepts it.

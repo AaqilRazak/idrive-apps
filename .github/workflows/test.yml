@@ -86,6 +86,7 @@ jobs:
         run: |
           node native/vizualyse-cluster/test/shader_lint.js
           docker run --rm -v "$PWD:/repo:ro" -w /repo node:8.16.2-alpine node native/vizualyse-cluster/test/themes_test.js
+          docker run --rm -v "$PWD:/repo:ro" -w /repo node:8.16.2-alpine node native/vizualyse-cluster/test/switch_test.js
           docker run --rm -v "$PWD:/repo" -w /repo node:8.16.2-alpine node native/vizualyse-cluster/test/tool_test.js
           docker run --rm -v "$PWD:/repo" -w /repo node:8.16.2-alpine node native/vizualyse-cluster/test/picker_test.js
           docker run --rm -v "$PWD:/r:ro" -w /r python:3.12-slim python3 native/vizualyse-cluster/test/touch_reader_test.py

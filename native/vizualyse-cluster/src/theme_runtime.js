@@ -75,8 +75,16 @@ class ThemeRuntime {
                 pixels[k] = { px: px, key: [a.format, a.w, a.h, a.sampling || 'nearest', hash].join(':') };
             });
         } catch (e) { this._dropAll(keep); throw e; }
-        /* everything read and checked: now the cluster */
+        /* everything read and checked: now the cluster. The last theme's
+         * assets this one doesn't share go first: cluster-render holds 16
+         * assets a client, and dropping them only after the new ones were
+         * made went over it on a switch between families (12 + 12); the
+         * client still hands out refs and the server refuses the last ones,
+         * so tri2 lost its glyph atlases and showed no text (2026-11-14) */
         const cr = this.cr;
+        const wanted = {};
+        Object.keys(pixels).forEach((k) => { wanted[pixels[k].key] = true; });
+        Object.keys(keep).forEach((key) => { if (!wanted[key]) { cr.drop(keep[key]); delete keep[key]; } });
         let sent = 0, kept = 0;
         Object.keys(theme.assets).forEach((k) => {
             const a = theme.assets[k], p = pixels[k];
