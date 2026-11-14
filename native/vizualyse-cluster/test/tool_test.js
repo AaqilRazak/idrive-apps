@@ -141,14 +141,21 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     assert.ok(artFrame.bytes < 1920 * 646 * 4 / 2, 'the tiled art is under half the picture: ' + artFrame.bytes + ' bytes');
     ops.filter((m) => m.op === 'bind').forEach((b) => assert.ok(assets.some((a) => a.ref === b.asset), 'bind to a known asset'));
 
-    /* the demo: only at a standstill (bench is off) */
+    /* the demo as the source is a bench setting: refused on the car (bench
+     * off), where the demo runs only for a Try, at a standstill */
     errors = [];
     send({ cmd: 'source', source: 'demo' });
     await until(() => errors.length, 2000, 'demo refused');
-    assert.ok(/parked/.test(errors[0]), 'demo refused while the speed is unknown: ' + errors[0]);
+    assert.ok(/bench/.test(errors[0]), 'the demo source refused off the bench: ' + errors[0]);
+    assert.strictEqual(statusNow.source, 'car');
+    errors = [];
+    send({ cmd: 'try', id: 'samplec' });
+    await until(() => errors.length, 2000, 'try refused');
+    assert.ok(/parked/.test(errors[0]), 'a Try refused while the speed is unknown: ' + errors[0]);
     send({ cmd: 'speed', kmh: 0 });
     await wait(100);
-    send({ cmd: 'source', source: 'demo' });
+    send({ cmd: 'try', id: 'samplec' });
+    await until(() => statusNow.trying && statusNow.demo, 2000, 'the Try runs the demo');
     await wait(400);
     const before = ops.length, b0 = bytes;
     await wait(2000);
@@ -161,8 +168,8 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
 
     /* the car moves: the demo stops */
     send({ cmd: 'speed', kmh: 40 });
-    await until(() => statusNow.source === 'car', 3000, 'demo stopped while moving');
-    console.log('ok   demo stops when the car moves');
+    await until(() => !statusNow.trying && !statusNow.demo, 3000, 'the Try ended while moving');
+    console.log('ok   the demo is a bench source (refused on the car); a Try\'s demo stops when the car moves');
 
     /* Sport and Comfort: no drive mode known, so the family's Comfort theme
      * (samplec) runs; Sport by hand switches to sample, which shares every

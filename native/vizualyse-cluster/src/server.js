@@ -64,6 +64,11 @@ function saveSettings() { try { writeJson(SETTINGS_FILE, settings); } catch (e) 
 /* ---- the car's signals (from the app) ---- */
 const car = { values: {}, at: {}, kmh: null, kmhAt: 0 };
 function moving() { return car.kmh === null || Date.now() - car.kmhAt > 10000 ? null : car.kmh > MAX_KMH; }
+/* The demo drive as the source: a bench setting only. On the car (bench
+ * off) a "demo" left in settings.json is ignored: the theme shows the car's
+ * readings, and the demo runs only for the picker's Try (2026-11-14: a
+ * leftover "demo" kept the car's themes animating while parked). */
+function demoSource() { return settings.source === 'demo' && !!settings.bench; }
 function demoAllowed() { const m = moving(); return settings.bench ? m !== true : m === false; }
 function setSignals(c) {
     const now = Date.now();
@@ -95,7 +100,7 @@ function carSignals() {
 /* ---- Sport or Comfort ---- */
 function mode() {
     if (settings.mode === 'sport' || settings.mode === 'comfort') return settings.mode;
-    if (settings.source === 'demo') return 'sport';
+    if (demoSource()) return 'sport';
     const dm = car.values.driveMode;
     if (typeof dm === 'string' && Date.now() - car.at.driveMode < 10000) return /SPORT/i.test(dm) ? 'sport' : 'comfort';
     return 'comfort';   /* the car starts in Comfort */
@@ -171,14 +176,14 @@ const timer = setInterval(() => {
     const t = (now - started) / 1000;
     const dt = last ? (now - last) / 1000 : 0;
     last = now;
-    const sig = (trial || settings.source === 'demo') && demoAllowed() ? Object.assign({ source: 'demo' }, sim.at(t, runtime.theme.mode)) : carSignals();
+    const sig = (trial || demoSource()) && demoAllowed() ? Object.assign({ source: 'demo' }, sim.at(t, runtime.theme.mode)) : carSignals();
     runtime.tick(sig, dt, t);
 }, TICK_MS);
 
 function status() {
     const themes = (() => { try { return runtime.list(); } catch (e) { return []; } })();
     return { enabled: settings.enabled, theme: settings.theme, mode: settings.mode, cover: !!settings.cover, showing: runtime.theme ? runtime.theme.id : null,
-        source: settings.source, demo: settings.source === 'demo' && demoAllowed(), bench: settings.bench, panel: target,
+        source: demoSource() ? 'demo' : 'car', demo: (!!trial || demoSource()) && demoAllowed(), bench: settings.bench, panel: target,
         moving: moving(), speed: car.kmh, themes: themes.map((x) => ({ id: x.id, title: x.title, family: x.family, mode: x.mode })),
         signals: Object.keys(car.values).sort(), error: lastError, look: mode(),
         picker: picker.shown(), trying: trying(), canTry: demoAllowed() };
@@ -264,6 +269,7 @@ function command(c) {
     }
     if (c.cmd === 'source') {
         if (c.source !== 'car' && c.source !== 'demo') return 'source is car or demo';
+        if (c.source === 'demo' && !settings.bench) return 'the demo is a bench setting (bench: true); on the car, use Try';
         if (c.source === 'demo' && !demoAllowed()) return 'the demo runs only while parked';
         settings.source = c.source; saveSettings(); return null;
     }
@@ -289,4 +295,5 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 cr.connect();
 control = startControl({ app: 'vizualyse_cluster', status: status, command: command, log: log });
 if (settings.enabled) show();
-log('vizualyse-cluster: ' + (settings.enabled ? 'on, theme ' + settings.theme + ', source ' + settings.source : 'off'));
+log('vizualyse-cluster: ' + (settings.enabled ? 'on, theme ' + settings.theme + ', source ' + (demoSource() ? 'demo' : 'car') : 'off') +
+    (settings.source === 'demo' && !settings.bench ? ' ("demo" in settings.json ignored: not a bench)' : ''));
