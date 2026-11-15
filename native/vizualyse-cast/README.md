@@ -110,7 +110,17 @@ there `/map?showETA=yes`: the card bottom right), `/map` neither. The
 options only apply through `showUI`, not `/info`'s `initialURL`; the view
 /info names (`/run/hook111/view`) follows the directions card. The commands
 are `{"cmd":"carplayCards","directions":…,"eta":…}` and
-`POST /api/carplay-cards`.
+`POST /api/carplay-cards`. hook111 0.1.6 sends the scene again 1, 4 and 10 s
+after each new stream or change (0.1.5's single send, with the stream's first
+frame, often didn't take: issue #1), and says when the phone answered
+(`ui_acked`); the cards stay "pending" until then.
+
+**Day / night** (hook111 0.1.6): the cluster map follows the car's own
+day / night (its light sensor, which already switches the main screen in a
+tunnel). Nothing to set in the tool; `/api/status` shows it as
+`carplay.night` (`now`, what the `car` last said, whether the phone
+`acked`). For a test on the car, `echo night > /run/hook111/night` (or
+`day`) forces it until the file is removed.
 
 **Zoom** ("CarPlay map: zoom in / out", "−" / "+" on the phone page): a
 request in `/run/hook111/zoom` that hook111 sends as `changeMapZoomLevel`.

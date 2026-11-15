@@ -400,6 +400,20 @@ installs and the updater installs apps (ours too) through the uplink
   send `repeat` for an unchanged frame (when the service's `hello` has
   `repeat` 1), and crop the map's dimmed bands (y 0-72, 440-480).
 
+- [ ] **hook111 0.1.6 / Cast 0.3.14 on the car** (issue #1; built and tested
+  off the car 2026-11-15, `setup_b.c` 137 checks). Read
+  `/run/hook111/log/status` after each step (not polled during the stream):
+  - a fresh connection with only the time / distance card on: the cards as
+    set without touching them (`showUI` now again at +1, +4, +10 s;
+    `ui_resent=3`, `ui_acked=1`). Also the directions card off, which did
+    nothing on 2026-11-05;
+  - day / night by hand: `echo night > /run/hook111/night`, then `day`,
+    then `rm` it (follows the car again); then a tunnel: `night_calls`
+    rises, `night_car` flips, the cluster map follows. Google Maps and Waze;
+  - watch for: the map greying out (more `showUI` than before; many changes
+    in a row greyed it on 2026-11-05), a repeat resetting the zoom, and the
+    phone refusing sessions (`fell_back=1`) now that the cluster's `/info`
+    record declares `nightMode`.
 - [ ] **On the car:** whether the phone draws the HUD size it is offered
   (1056x384), and how the cluster view looks at that shape.
 - [ ] **On the car (still to test):**

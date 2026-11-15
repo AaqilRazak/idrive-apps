@@ -185,7 +185,13 @@ function state(run) {
         size: st.b_size || null,                           /* what the phone really sends (its SPS), hook111 0.1.3+ */
         safearea: st.safearea || null,                     /* x,y,w,h last offered, or none */
         safeWanted: (readText(path.join(run, 'safearea')) || '').trim() || null,
-        uiUrl: st.ui_url && st.ui_url !== 'none' ? st.ui_url : null,   /* the scene the phone took (showUI), hook111 0.1.5+ */
+        uiUrl: st.ui_url && st.ui_url !== 'none' ? st.ui_url : null,   /* the scene last sent (showUI), hook111 0.1.5+ */
+        /* the phone answered that showUI (hook111 0.1.6+); null: an older hook111, which can't tell */
+        uiAcked: st.ui_acked !== undefined ? st.ui_acked === '1' : null,
+        /* day / night for the cluster (hook111 0.1.6+): what it is now (the night file, else the car's), what the car last said, the phone's answer */
+        night: st.night && st.night !== 'none' ? st.night : null,
+        nightCar: st.night_car && st.night_car !== 'none' ? st.night_car : null,
+        nightAcked: st.night_acked !== undefined ? st.night_acked === '1' : null,
         viewarea: st.viewarea !== undefined ? Number(st.viewarea) : null,
     };
 }
@@ -235,17 +241,20 @@ function wantDisplay(output, run, centre, alt) {
 }
 
 /* The cluster scene for the cards (sceneUrl): written for hook111, which
- * sends it as showUI while the stream runs (0.1.5; at once, no reconnect),
- * and the view /info names at the phone's next connection. Returns { url,
- * sent } (sent: the phone has it), or null without hook111's run directory. */
+ * sends it as showUI while the stream runs (0.1.5; at once, no reconnect;
+ * 0.1.6 again 1, 4 and 10 s later), and the view /info names at the phone's
+ * next connection. Returns { url, sent } (sent: hook111 sent it and, from
+ * 0.1.6, the phone answered), or null without hook111's run directory. */
 function wantScene(o, run) {
     run = run || RUN;
     if (!fs.existsSync(run)) return null;
     const url = sceneUrl(o);
     writeIfChanged(path.join(run, 'url'), url);
     writeIfChanged(path.join(run, 'view'), o.directions ? 'cluster' : 'map');
-    return { url: url, sent: state(run).uiUrl === url };
+    return { url: url, sent: sceneTaken(state(run), url) };
 }
+/* The phone has the scene url (a state()): sent, and answered when the hook can tell. */
+function sceneTaken(st, url) { return st.uiUrl === url && st.uiAcked !== false; }
 
 /* Zoom the cluster map: "in" or "out", taken by hook111 (0.1.5) within half
  * a second while the stream runs. */
@@ -324,4 +333,4 @@ function switchState(o) {
     return { installed: true, on: saved === 'alt', saved: saved, pending: pending };
 }
 
-module.exports = { TARGETS, RUN, VAR, ARM, MODES, VIEWS, VIEW_TITLES, DEFAULT_PORT, state, savedMode, setMode, switchState, drawFor, safeAreaFor, safeText, wantDisplay, wantView, sceneUrl, wantScene, requestZoom, inputArgs, outputArgs, PREVIEW, previewArgs, readKv, displayText };
+module.exports = { TARGETS, RUN, VAR, ARM, MODES, VIEWS, VIEW_TITLES, DEFAULT_PORT, state, savedMode, setMode, switchState, drawFor, safeAreaFor, safeText, wantDisplay, wantView, sceneUrl, wantScene, sceneTaken, requestZoom, inputArgs, outputArgs, PREVIEW, previewArgs, readKv, displayText };

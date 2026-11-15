@@ -23,6 +23,10 @@
  *          command the library's own way; while screen B streams, the
  *          consumer's scene URL goes as showUI, its view area as
  *          updateViewArea and its zoom requests as changeMapZoomLevel.
+ *  night   AirPlayReceiverSessionSetNightMode (0x1846d0) is wrapped: the
+ *          car's day / night still goes out as stock (no uuid), and is sent
+ *          again addressed to the second display, whose /info record says
+ *          its nightMode.
  *  frames  The four ScreenStream functions are replaced by equivalents: calls
  *          for screen B's context go to the sink; all others do what the stock
  *          code does.
@@ -89,6 +93,12 @@ static CF CFStr(const char *s) {
 #define K_FEATURES AT(0x1a0aa8)  /* "features" */
 #define K_PARAMS   AT(0x1b65e8)  /* "params" (a /command body) */
 #define K_URL      AT(0x1b835c)  /* "url" (requestUI's) */
+#define K_NIGHT    AT(0x1b8447)  /* "nightMode" (SetNightMode's params) */
+#define K_NIGHTPROP AT(0x1a0b39) /* "nightMode", the /info property CopyProperty compares: Cinemo's mode
+                                  * (0x18d610: config +0x840, -1 unknown; its SetNightMode 0x18dbb0 sets it) */
+/* the library's booleans, as SetNightMode (0x1846d0) loads them */
+#define CF_TRUE    (*(CF *)AT(0x3de790))
+#define CF_FALSE   (*(CF *)AT(0x3de788))
 #define K_DISPLAYS AT(0x1a0b89)  /* the /info property name CopyProperty compares */
 #define K_UUID     AT(0x1a0a20)
 #define K_MAXFPS   AT(0x1a0ab9)
@@ -587,6 +597,67 @@ static int read_small(const char *path, char *b, size_t n) {
     return (int)r;
 }
 
+/* ---- day / night for the second display ----
+ * The car's light sensor reaches CarPlay as AirPlayReceiverSessionSetNightMode
+ * (0x1846d0, called only by Cinemo's ios_in_the_car_set_night_mode): one
+ * command {type: setNightMode, params: {nightMode: bool}}, with no display
+ * uuid. Per luka-dev/mib2q-carplay-rgi (CarKit, iOS 26/27), the phone applies
+ * that to the main screen and to second screens that don't declare their own
+ * nightMode in /info; theirs declares it and repeats the command with the
+ * cluster's uuid, which on their car kept the cluster in step. On this car
+ * the cluster stayed in the mode it connected in (issue #1, Waze; Google
+ * Maps picked it at connection). So the same here: the second record's
+ * nightMode, and setNightMode {uuid, nightMode} on every change and at each
+ * new stream (a change before the stream is up isn't lost).
+ * Which value: the night file ("day" / "night", for the bench) if it says
+ * one; else the car's last SetNightMode this run; else Cinemo's own mode as
+ * /info reports it (the stock top-level nightMode: config +0x840, which
+ * Cinemo's SetNightMode sets before the session's, -1 until the car says;
+ * read at each /info, and never preferred to a SetNightMode already seen:
+ * their issue #40 was a stale /info value making the cluster night while the
+ * main screen was day); else unknown, and nothing is declared or sent. */
+static char night_path[256];
+static volatile int night_car = -1;      /* the car's last SetNightMode: 0 day, 1 night, -1 none yet */
+static volatile int night_info = -1;     /* /info's own nightMode (Cinemo's mode) at the last /info */
+static volatile int night_offered = -1;  /* what the last /info declared for the second display */
+void hook111_night_file(const char *path) { night_path[0] = 0; if (path && strlen(path) < sizeof night_path) strcpy(night_path, path); }
+static int night_now(void) {
+    char b[16];
+    if (night_path[0] && read_small(night_path, b, sizeof b) > 0) {
+        if (!strcmp(b, "night")) return 1;
+        if (!strcmp(b, "day")) return 0;
+    }
+    return night_car >= 0 ? night_car : night_info;
+}
+static const char *night_name(int n) { return n == 1 ? "night" : n == 0 ? "day" : "none"; }
+
+/* ---- the phone's answers to what we send ----
+ * Sent with the library's completion (0x17a0c0 / 0x17a2a0): it runs on the
+ * session's event queue when the phone answers /command, with the status
+ * from its reply (0 for an empty 200), or an error if it doesn't. Each send
+ * gets a number; an answer counts only for the latest send of its kind.
+ * Lock-free: the sender waits on that same queue (0x1460e0), so the
+ * completion must not take a lock the sender holds. An answer says the phone
+ * took the command, not that the scene changed. */
+enum { ACK_UI, ACK_NIGHT };
+static volatile unsigned ack_seq[2], ack_got[2];
+static volatile int ack_rc[2];
+static int ui_acked_now(void) { return ack_seq[ACK_UI] && ack_got[ACK_UI] == ack_seq[ACK_UI] && ack_rc[ACK_UI] == 0; }
+static int night_acked_now(void) { return ack_seq[ACK_NIGHT] && ack_got[ACK_NIGHT] == ack_seq[ACK_NIGHT] && ack_rc[ACK_NIGHT] == 0; }
+static void status_now(int force);
+static void ack_done(int status, CF resp, void *ctx) {
+    (void)resp;
+    uintptr_t t = (uintptr_t)ctx;
+    int kind = (int)(t & 1);
+    unsigned seq = (unsigned)(t >> 1);
+    if (seq != ack_seq[kind]) return;   /* an older send's */
+    ack_rc[kind] = status;
+    ack_got[kind] = seq;
+    if (kind == ACK_UI) { hook111_stats.ui_ack_rc = status; if (!status) hook111_stats.ui_acks++; }
+    else { hook111_stats.night_ack_rc = status; if (!status) hook111_stats.night_acks++; }
+    status_now(1);
+}
+
 /* ---- the view area in use: 0 the safe area (centred), 1 Maps' own layout ----
  * hook111_viewarea_file holds "0" or "1" (missing or anything else: 0). It
  * picks initialViewArea at /info and, while screen B streams, a change is
@@ -675,6 +746,10 @@ static void status_now(int force) {
     fprintf(f, "features=%s\ninfo_extra_a=%d\ninfo_extra_b=%d\n", answered_features, x->info_extra_a, x->info_extra_b);
     fprintf(f, "ui_url=%s\nui_sent=%d\nui_rc=%d\nviewarea=%d\nva_sent=%d\nzoom_sent=%d\n",
             ui_url_sent[0] ? ui_url_sent : "none", x->ui_sent, x->ui_rc, ui_va_sent, x->va_sent, x->zoom_sent);
+    fprintf(f, "ui_acked=%d\nui_resent=%d\nui_acks=%d\nui_ack_rc=%d\n", ui_acked_now(), x->ui_resent, x->ui_acks, x->ui_ack_rc);
+    fprintf(f, "night=%s\nnight_car=%s\nnight_info=%s\nnight_offered=%s\nnight_calls=%d\nnight_sent=%d\nnight_acked=%d\nnight_acks=%d\nnight_ack_rc=%d\n",
+            night_name(night_now()), night_name(night_car), night_name(night_info), night_name(night_offered),
+            x->night_calls, x->night_sent, night_acked_now(), x->night_acks, x->night_ack_rc);
     if (hook111_status_extra) hook111_status_extra(f);
     fclose(f);
     rename(q, p);
@@ -833,13 +908,25 @@ static void my_teardown(void *session, CF req, int reason, void *done) {
  * it: {type, params} goes to 0x17a0c0 on the session's event queue (+0x468),
  * which POSTs it as a binary plist to /command on the events connection
  * (+0x470, up once +0x466 is set by _ControlStart). */
-static int send_dict(void *session, CF cmd) {
+/* With a completion, 0x17a0c0 retains the session, arms the response timer
+ * (+0x480, 10 s) and calls completion(status, response or NULL, ctx) on the
+ * event queue when the phone answers. */
+static int send_dict_cb(void *session, CF cmd, void (*done)(int, CF, void *), void *ctx) {
     if (!session || !*((char *)session + 0x466) || !*(void **)((char *)session + 0x468)) return -6709;  /* not started */
     log_plist("sent", cmd);
-    struct { void *session; CF cmd; void *completion, *ctx; int rc; } c = { session, cmd, NULL, NULL, -6700 };
+    struct { void *session; CF cmd; void *completion, *ctx; int rc; } c = { session, cmd, (void *)done, ctx, -6700 };
     FN(void (*)(void *, void *, void *), 0x1460e0)(*(void **)((char *)session + 0x468), &c, AT(0x17a0c0));
     if (c.rc == 0) hook111_stats.commands_sent++;
     return c.rc;
+}
+static int send_dict(void *session, CF cmd) { return send_dict_cb(session, cmd, NULL, NULL); }
+static int send_command_cb(void *session, const char *type, CF params, void (*done)(int, CF, void *), void *ctx) {
+    CF cmd = CFDictCreate(), t = CFStr(type);
+    CFDictSet(cmd, K_TYPE, t); CFRelease(t);
+    if (params) CFDictSet(cmd, K_PARAMS, params);
+    int rc = send_dict_cb(session, cmd, done, ctx);
+    CFRelease(cmd);
+    return rc;
 }
 int hook111_send_command(void *session, const char *type, void *params) {
     CF cmd = CFDictCreate(), t = CFStr(type);
@@ -870,45 +957,109 @@ int hook111_request_keyframe(void) {
     return rc;
 }
 
-/* ---- the cluster scene, the view area and zoom, from the consumer ----
- * Files the consumer (vizualyse-cast) writes; checked from screen B's frame
- * pump, so only while its stream is decodable, at most every 500 ms:
- *  url       the scene: sent as showUI {uuid, url} once per stream and again
- *            when it changes. Its query sets the cards: showETA=yes|no,
- *            maneuverLayout=..., showSpeedLimit=... (DashBoard's
- *            applySettingsForClusterURL, per luka-dev/mib2q-carplay-rgi). On the
- *            car (2026-11-04) these applied at once from showUI and not from
- *            /info's initialURL; showUI did not cost the main screen.
+/* ---- the cluster scene, day / night, the view area and zoom ----
+ * Files the consumer (vizualyse-cast) writes, checked while screen B streams
+ * (b->started), at most every 500 ms, from two places: screen B's frame pump,
+ * and the phone's own commands (iAPSendMessage / updateFeedback about once a
+ * second), so a change waits for neither a moving map nor a reconnect.
+ *  url       the scene: sent as showUI {uuid, url} at each new stream and when
+ *            it changes, then again 1, 4 and 10 s later. Its query sets the
+ *            cards: showETA=yes|no, maneuverLayout=..., showSpeedLimit=...
+ *            (DashBoard's applySettingsForClusterURL, per
+ *            luka-dev/mib2q-carplay-rgi). On the car (2026-11-04) these applied
+ *            at once from showUI sent from the bench into a running stream, and
+ *            not from /info's initialURL. The repeats: hook111 0.1.5 sent it once,
+ *            with the stream's first frame, and the cards often didn't apply
+ *            until the setting was changed (issue #1): the phone's cluster scene
+ *            likely isn't ready for it that early. The phone took the same URL
+ *            again without trouble (findings, "The cluster scene"). Not repeated
+ *            beyond 10 s: whether a repeat resets the map's zoom is untested.
+ *  night     day / night (night_now, above): setNightMode {uuid, nightMode} at
+ *            each new stream and on a change, repeated the same way.
  *  viewarea  "0" / "1": sent as updateViewArea when it differs from what the
  *            phone was last given (needs both view areas offered at /info).
  *  zoom      "in" / "out": taken (renamed, read, removed) and sent as
- *            changeMapZoomLevel {uuid, zoomDirection 0 in / 1 out}. */
+ *            changeMapZoomLevel {uuid, zoomDirection 0 in / 1 out}.
+ * ui_lock: the pump and the command path can both poll; neither holds it
+ * while waiting for anything but the event queue, and the event queue (where
+ * the phone's answers land, ack_done) never takes it. */
 static char url_path[256], zoom_path[256];
 void hook111_url_file(const char *path) { url_path[0] = 0; if (path && strlen(path) < sizeof url_path) strcpy(url_path, path); }
 void hook111_zoom_file(const char *path) { zoom_path[0] = 0; if (path && strlen(path) < sizeof zoom_path) strcpy(zoom_path, path); }
-static void ui_reset(void) { ui_need = 1; ui_url_sent[0] = 0; ui_va_sent = offered_va; }
+static pthread_mutex_t ui_lock = PTHREAD_MUTEX_INITIALIZER;
+static volatile int night_need = 1;     /* a new stream: send day / night again */
+static int night_sent = -1;             /* what the phone was last sent, this stream */
 
-static int send_with_uuid(void *session, const char *type, CF params) {
+/* the repeats after a fresh send: 1, 4 and 10 s after it */
+static const int REPEAT_GAP_MS[] = { 1000, 3000, 6000 };
+#define REPEATS ((int)(sizeof REPEAT_GAP_MS / sizeof *REPEAT_GAP_MS))
+struct repeat { int done; long long next; };      /* done: repeats sent since the fresh send */
+static struct repeat ui_rep = { REPEATS, 0 }, night_rep = { REPEATS, 0 };
+static void repeat_fresh(struct repeat *r, long long now) { r->done = 0; r->next = now + REPEAT_GAP_MS[0]; }
+static int repeat_due(const struct repeat *r, long long now) { return r->done < REPEATS && now >= r->next; }
+static void repeat_step(struct repeat *r, long long now) { r->done++; if (r->done < REPEATS) r->next = now + REPEAT_GAP_MS[r->done]; }
+static long long mono_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000; }
+static long long (*ui_clock)(void) = mono_ms;   /* the harness steps its own */
+
+static void ui_reset(void) {
+    pthread_mutex_lock(&ui_lock);
+    ui_need = 1; ui_url_sent[0] = 0; ui_va_sent = offered_va;
+    night_need = 1; night_sent = -1;
+    ui_rep.done = night_rep.done = REPEATS;
+    pthread_mutex_unlock(&ui_lock);
+}
+
+static int send_with_uuid_cb(void *session, const char *type, CF params, int kind) {
     CF u = CFStr(disp.uuid);
     CFDictSet(params, K_UUID, u); CFRelease(u);
-    int rc = hook111_send_command(session, type, params);
+    int rc;
+    if (kind < 0) rc = hook111_send_command(session, type, params);
+    else {
+        unsigned seq = ++ack_seq[kind];
+        rc = send_command_cb(session, type, params, ack_done, (void *)(((uintptr_t)seq << 1) | (uintptr_t)kind));
+    }
     CFRelease(params);
     return rc;
 }
-static void ui_poll(struct screen_b *b, int force) {
+static int send_with_uuid(void *session, const char *type, CF params) { return send_with_uuid_cb(session, type, params, -1); }
+
+/* session: screen B's, while it streams; the caller makes sure of that */
+static void ui_poll_session(void *session, int force) {
     static long long last;
-    struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
-    long long now = (long long)t.tv_sec * 1000000000LL + t.tv_nsec;
-    if (!b || !b->started || (!force && last && now - last < 500000000LL)) return;
+    pthread_mutex_lock(&ui_lock);
+    long long now = ui_clock();
+    if (!force && last && now - last < 500) { pthread_mutex_unlock(&ui_lock); return; }
     last = now;
     char url[512];
-    if (read_small(url_path, url, sizeof url) > 0 && (ui_need || strcmp(url, ui_url_sent))) {
-        CF p = CFDictCreate(), s = CFStr(url);
-        CFDictSet(p, K_URL, s); CFRelease(s);
-        int rc = send_with_uuid(b->session, "showUI", p);
-        hook111_stats.ui_rc = rc;
-        if (rc == 0) { snprintf(ui_url_sent, sizeof ui_url_sent, "%s", url); ui_need = 0; hook111_stats.ui_sent++; }
-        status_now(1);
+    if (read_small(url_path, url, sizeof url) > 0) {
+        int fresh = ui_need || strcmp(url, ui_url_sent);
+        if (fresh || repeat_due(&ui_rep, now)) {
+            CF p = CFDictCreate(), s = CFStr(url);
+            CFDictSet(p, K_URL, s); CFRelease(s);
+            int rc = send_with_uuid_cb(session, "showUI", p, ACK_UI);
+            hook111_stats.ui_rc = rc;
+            if (rc == 0) {
+                if (fresh) { snprintf(ui_url_sent, sizeof ui_url_sent, "%s", url); ui_need = 0; repeat_fresh(&ui_rep, now); }
+                else { repeat_step(&ui_rep, now); hook111_stats.ui_resent++; }
+                hook111_stats.ui_sent++;
+            }
+            status_now(1);
+        }
+    }
+    int n = night_now();
+    if (n >= 0) {
+        int fresh = night_need || n != night_sent;
+        if (fresh || repeat_due(&night_rep, now)) {
+            CF p = CFDictCreate();
+            CFDictSet(p, K_NIGHT, n ? CF_TRUE : CF_FALSE);
+            int rc = send_with_uuid_cb(session, "setNightMode", p, ACK_NIGHT);
+            if (rc == 0) {
+                if (fresh) { night_sent = n; night_need = 0; repeat_fresh(&night_rep, now); }
+                else repeat_step(&night_rep, now);
+                hook111_stats.night_sent++;
+            }
+            status_now(1);
+        }
     }
     int va = viewarea_now();
     if (offered_viewareas && va != ui_va_sent) {
@@ -917,7 +1068,7 @@ static void ui_poll(struct screen_b *b, int force) {
         if (va) { n = CFNumI64(0); CFArrayAppend(adj, n); CFRelease(n); }
         k = CFStr("adjacentViewAreas"); CFDictSet(p, k, adj); CFRelease(k); CFRelease(adj);
         n = CFNumI64(300); k = CFStr("animationDurationMillis"); CFDictSet(p, k, n); CFRelease(k); CFRelease(n);
-        int rc = send_with_uuid(b->session, "updateViewArea", p);
+        int rc = send_with_uuid(session, "updateViewArea", p);
         if (rc == 0) { ui_va_sent = va; hook111_stats.va_sent++; }
         status_now(1);
     }
@@ -930,11 +1081,28 @@ static void ui_poll(struct screen_b *b, int force) {
             if (dir >= 0) {
                 CF p = CFDictCreate(), n = CFNumI64(dir), k = CFStr("zoomDirection");
                 CFDictSet(p, k, n); CFRelease(k); CFRelease(n);
-                if (send_with_uuid(b->session, "changeMapZoomLevel", p) == 0) hook111_stats.zoom_sent++;
+                if (send_with_uuid(session, "changeMapZoomLevel", p) == 0) hook111_stats.zoom_sent++;
                 status_now(1);
             }
         }
     }
+    pthread_mutex_unlock(&ui_lock);
+}
+/* From screen B's frame pump: teardown joins the pump before freeing b. */
+static void ui_poll(struct screen_b *b, int force) {
+    if (b && b->started) ui_poll_session(b->session, force);
+}
+/* From the phone's commands, on the session's control thread (which keeps
+ * the session alive meanwhile): screen B is looked at with b_life held, only
+ * tried (a SETUP or TEARDOWN in progress: the next poll will do), and not
+ * held while sending, which can wait for the phone's answer to an earlier
+ * command (one /command at a time). */
+static void ui_poll_from(void *session, int force) {
+    if (pthread_mutex_trylock(&b_life) != 0) return;
+    struct screen_b *b = current_b;
+    int ours = b && b->session == session && b->started;
+    pthread_mutex_unlock(&b_life);
+    if (ours) ui_poll_session(session, force);
 }
 
 /* suggestUI is accepted and logged, and NOT answered. On the unit
@@ -952,6 +1120,7 @@ static int (*orig_control)(void *, int, CF, CF, CF, CF *);
 static int my_control(void *session, int flags, CF cmd, CF qual, CF params, CF *resp) {
     log_command("command", cmd, params);
     bench_send(session);
+    ui_poll_from(session, 0);   /* the scene and day / night, without waiting for a frame */
     status_now(0);
     CF su = CFStr("suggestUI");
     int ours = cmd && CFEqual(cmd, su);
@@ -959,6 +1128,25 @@ static int my_control(void *session, int flags, CF cmd, CF qual, CF params, CF *
     if (!ours || read_mode() == MODE_OFF) return orig_control(session, flags, cmd, qual, params, resp);
     hook111_stats.suggest_ui++;
     return 0;   /* a suggestion: accepted, nothing sent (see above) */
+}
+
+/* AirPlayReceiverSessionSetNightMode(session, night (a byte), completion, ctx):
+ * the car's day / night, from Cinemo's ios_in_the_car_set_night_mode
+ * (0x10f900), its only caller. The stock command goes out as it is; the
+ * value is only kept here, and the next poll (the phone's next command or
+ * frame, within about a second) sends it to the second display, or its next
+ * stream does. Not sent from here: the library's HTTP client takes one
+ * /command at a time on the event queue, so a second send waits for the
+ * phone's answer to the stock one, and this is the car's own call. In every
+ * mode: off still records it, so turning the second screen on later starts
+ * in the right one. */
+static int (*orig_night)(void *session, int night, void *completion, void *ctx);
+static int my_night(void *session, int night, void *completion, void *ctx) {
+    night_car = (night & 0xff) ? 1 : 0;
+    hook111_stats.night_calls++;
+    int rc = orig_night(session, night, completion, ctx);
+    status_now(1);
+    return rc;
 }
 
 static CF (*orig_copyprop)(void *, CF, void *, int *, void *);
@@ -984,6 +1172,15 @@ static CF my_copyprop(void *a1, CF prop, void *a3, int *err, void *cfg) {
     CF urls = CFArrayCreate();
     for (int i = 0; i < 3 && disp.suggest_urls[i]; i++) { s = CFStr(disp.suggest_urls[i]); CFArrayAppend(urls, s); CFRelease(s); }
     k = CFStr("altScreenSuggestUIURLs"); CFDictSet(d, k, urls); CFRelease(k); CFRelease(urls);
+    {   /* day / night: the stock /info's (see night_now), then ours declared */
+        int e = 0;
+        CF sn = orig_copyprop(a1, K_NIGHTPROP, a3, &e, cfg);   /* Cinemo's mode now: true, false, or NULL (unknown) */
+        night_info = !sn || e ? -1 : CFEqual(sn, CF_TRUE) ? 1 : 0;
+        if (sn) CFRelease(sn);
+        int nn = night_now();
+        night_offered = nn;
+        if (nn >= 0) CFDictSet(d, K_NIGHT, nn ? CF_TRUE : CF_FALSE);
+    }
     add_viewareas(d, w, h);   /* the safe area, when the consumer asked for one */
     CF xb = trial_plist("info-b.plist"), xa = trial_plist("info-a.plist");   /* the bench's extra keys (they win) */
     hook111_stats.info_extra_b = merge_pairs(d, xb);
@@ -1081,9 +1278,11 @@ int hook111_install(uintptr_t b, const struct hook111_sink *s, const struct hook
     static const unsigned char ctl_pro[16] = { 0x41,0x57, 0x41,0x56, 0x49,0x89,0xff, 0x41,0x55, 0x41,0x54, 0x41,0x89,0xf6, 0x55, 0x53 };
     /* IdleStateTransition 0x17c0e0: push r15; push r14; push r13; push r12; mov r13,rdi; push rbp; push rbx; mov r12,rsi */
     static const unsigned char idle_pro[16] = { 0x41,0x57, 0x41,0x56, 0x41,0x55, 0x41,0x54, 0x49,0x89,0xfd, 0x55, 0x53, 0x49,0x89,0xf4 };
+    /* SetNightMode 0x1846d0: push r15; push r14; mov r15,rdx; push r13; push r12; mov r13d,esi; push rbp; push rbx */
+    static const unsigned char night_pro[16] = { 0x41,0x57, 0x41,0x56, 0x49,0x89,0xd7, 0x41,0x55, 0x41,0x54, 0x41,0x89,0xf5, 0x55, 0x53 };
     if (memcmp(AT(0x180670), setup_pro, sizeof setup_pro) || memcmp(AT(0x10d270), copy_pro, sizeof copy_pro)
         || memcmp(AT(0x17e840), tear_pro, sizeof tear_pro) || memcmp(AT(0x183bf0), ctl_pro, sizeof ctl_pro)
-        || memcmp(AT(0x17c0e0), idle_pro, sizeof idle_pro)) return -1;
+        || memcmp(AT(0x17c0e0), idle_pro, sizeof idle_pro) || memcmp(AT(0x1846d0), night_pro, sizeof night_pro)) return -1;
     /* the CopyProperty trampoline: the rip-relative lea becomes movabs rdi, <0x3e1260> */
     unsigned char ct[29];
     void *lea_target = AT(0x3e1260);
@@ -1095,7 +1294,8 @@ int hook111_install(uintptr_t b, const struct hook111_sink *s, const struct hook
     orig_teardown = make_tramp(tear_pro, sizeof tear_pro, 0x17e840 + sizeof tear_pro);
     orig_control = make_tramp(ctl_pro, sizeof ctl_pro, 0x183bf0 + sizeof ctl_pro);
     orig_idle = make_tramp(idle_pro, sizeof idle_pro, 0x17c0e0 + sizeof idle_pro);
-    if (!orig_setup || !orig_copyprop || !orig_teardown || !orig_control || !orig_idle) return -1;
+    orig_night = make_tramp(night_pro, sizeof night_pro, 0x1846d0 + sizeof night_pro);
+    if (!orig_setup || !orig_copyprop || !orig_teardown || !orig_control || !orig_idle || !orig_night) return -1;
     /* the ScreenStream functions: stock prologues checked, then replaced */
     /* sizes 226, 92, 108, 69 bytes: room for the 14-byte jump */
     static const struct { uintptr_t at; unsigned char b[4]; } ss[] = {
@@ -1115,5 +1315,6 @@ int hook111_install(uintptr_t b, const struct hook111_sink *s, const struct hook
     if (patch_entry(0x17e840, tear_pro, sizeof tear_pro, (void *)my_teardown)) return -1;
     if (patch_entry(0x183bf0, ctl_pro, sizeof ctl_pro, (void *)my_control)) return -1;
     if (patch_entry(0x17c0e0, idle_pro, sizeof idle_pro, (void *)my_idle)) return -1;
+    if (patch_entry(0x1846d0, night_pro, sizeof night_pro, (void *)my_night)) return -1;
     return 0;
 }

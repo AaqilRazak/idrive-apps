@@ -61,13 +61,17 @@ void hook111_view_file(const char *path);
  * viewAreas records with it and SETUP answers viewAreas too. */
 void hook111_safearea_file(const char *path);
 /* The consumer's cluster controls, checked while screen B streams: the scene
- * URL (sent as showUI, once per stream and on a change), the view area ("0"
+ * URL (sent as showUI at a new stream and on a change, then again 1, 4 and
+ * 10 s later), the view area ("0"
  * centred on the safe area, "1" the whole display; initialViewArea, and
  * updateViewArea on a change) and zoom requests ("in" / "out", taken and sent
  * as changeMapZoomLevel). Not called: none. */
 void hook111_url_file(const char *path);
 void hook111_viewarea_file(const char *path);
 void hook111_zoom_file(const char *path);
+/* Day / night for the second display: "day" or "night" forces it, anything
+ * else (or missing) follows the car's own SetNightMode. Not called: follow. */
+void hook111_night_file(const char *path);
 /* The bench's trial files (features, info-a.plist, info-b.plist, unfallback)
  * live in dir; not called: none are read. See hook111.c, "trial files". */
 void hook111_trial_dir(const char *dir);
@@ -82,7 +86,8 @@ extern void (*hook111_status_extra)(FILE *f);
 /* Counters, for tests and logs. */
 struct hook111_stats { int setups_111, accepted, pump_rc, pump_done, enabled_features, info_records, teardowns, suggest_ui, commands_sent, keyframe_requests, logged, refusals,
     b_avcc, b_avcc_bytes, b_starts, b_stops, b_frames, sent_files, last_send_rc,
-    idle_held, idle_rc, b_width, b_height, info_extra_a, info_extra_b, ui_sent, ui_rc, va_sent, zoom_sent; long long b_frame_bytes; };
+    idle_held, idle_rc, b_width, b_height, info_extra_a, info_extra_b, ui_sent, ui_rc, va_sent, zoom_sent,
+    ui_resent, ui_acks, ui_ack_rc, night_calls, night_sent, night_acks, night_ack_rc; long long b_frame_bytes; };
 extern volatile struct hook111_stats hook111_stats;
 
 #endif

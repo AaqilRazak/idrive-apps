@@ -410,6 +410,44 @@ DashBoard parses the cluster URL's query into the scene settings
   `setup_b.c` checks each against a fake phone on the library's events
   connection.
 
+## The scene again, and day / night [static + harness, 2026-11-15]
+
+Issue #1 (Waze; the owner's Google Maps too): the cards often didn't match
+the settings until one was switched off and on, and the cluster stayed in
+the mode it connected in while the main screen followed the light sensor.
+
+- **0.1.5 sent `showUI` once**, from the frame pump on the stream's first
+  frame, and then only on a change. A change makes a new send, which is why
+  switching a setting off and on worked. The bench tests that proved the URLs
+  sent them into a running stream. 0.1.6 sends again 1, 4 and 10 s after a
+  new stream or a change, also polls from the phone's own commands (about
+  one a second) as well as from frames, and passes a completion: `ui_acked`
+  says the phone answered the latest send (it doesn't prove the scene
+  changed). Not tested on the car.
+- **Day / night is `AirPlayReceiverSessionSetNightMode` (0x1846d0)**, called
+  only by Cinemo's `ios_in_the_car_set_night_mode` (0x10f900), from
+  `NmeCarPlay::SetNightMode` (0x18dbb0), which first stores the mode in its
+  config (+0x840). It sends `{type: "setNightMode", params: {nightMode:
+  bool}}` (strings at 0x1b8432 / 0x1b8447, read from the library), the
+  library's booleans at 0x3de790 (true) / 0x3de788 (false), no display uuid.
+  `/info`'s top-level `nightMode` is `AirPlayServerCopyProperty("nightMode")`
+  (0x1a0b39), which returns the same config value through 0x18d610 (-1 until
+  set, then no key). Cinemo's display config does not carry a `nightMode`
+  into the display records (harness: `nightMode=1` in the display URL gave
+  none).
+- **Per luka-dev/mib2q-carplay-rgi** (CarKit, iOS 26/27): a uuid-less
+  `setNightMode` applies to the main screen and to second screens that don't
+  declare `nightMode` in `/info`; theirs declares it and repeats the command
+  with the cluster's uuid. hook111 0.1.6 does the same: the second record's
+  `nightMode` (the car's last `SetNightMode`, else the `/info` value), and
+  `setNightMode {uuid, nightMode}` on a change and at each new stream.
+- **One `/command` at a time:** 0x14a360 only queues the request on the
+  event queue, but the library's HTTP client sends the next one only after
+  the phone answers the last. So a second send waits a round trip for the
+  phone. That is why the wrapper around the car's `SetNightMode` only records
+  the value (the next poll sends ours), and why the harness's fake phone now
+  answers on its own thread.
+
 ## Loading into carplay [facts + static + harness, 2026-11-04]
 
 - `carplay.service`:

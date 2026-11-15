@@ -465,7 +465,8 @@ function status() {
         touch: touch.shown(), touchWanted: touchWanted, touchAvailable: touchAvailable, moving: moving(), speed: car.kmh,
         source: player ? player.opts.source || 'url' : (lastPlay && lastPlay.source) || 'url',
         carplay: { armed: c.armed, ready: c.ready, why: c.why, mode: c.mode, streaming: c.streaming, frames: c.frames,
-            display: c.display, wanted: c.wanted, size: c.size, switch: carplaySwitch(), cards: carplayCards(c), centre: carplayCentre(c), hudAlt: settings.carplayHudAlt },
+            display: c.display, wanted: c.wanted, size: c.size, switch: carplaySwitch(), cards: carplayCards(c), centre: carplayCentre(c), hudAlt: settings.carplayHudAlt,
+            night: { now: c.night, car: c.nightCar, acked: c.nightAcked } },
         outputs: Object.keys(OUTPUTS).filter((k) => k !== 'console' || consoleOut.available()).map((k) => ({ id: k, title: OUTPUTS[k].title })) }, s);
 }
 
@@ -625,7 +626,9 @@ const hudAltOn = (out) => out === 'hud' && settings.carplayHudAlt;
 /* The cluster scene: the directions card and the time / distance card,
  * written for hook111 (carplay_screen.sceneUrl), now and every 5 s (its run
  * directory is new at each start). hook111 0.1.5 sends a change to the phone
- * at once. The HUD's alternate mode shows the time / distance card only. */
+ * at once; 0.1.6 sends it again 1, 4 and 10 s later and says when the phone
+ * answered (pending until then). The HUD's alternate mode shows the time /
+ * distance card only. */
 function sceneOpts(out) {
     const alt = hudAltOn(out);
     return { directions: alt ? false : settings.carplayDirections, eta: settings.carplayEta, wide: alt || !settings.carplayCentre };
@@ -636,7 +639,7 @@ function syncScene() {
 function carplayCards(c) {
     const url = carplay.sceneUrl(sceneOpts(carplayOutput()));
     return { directions: settings.carplayDirections, eta: settings.carplayEta, url: url,
-        pending: c.streaming && c.uiUrl !== url ? 'in a moment' : null };
+        pending: c.streaming && !carplay.sceneTaken(c, url) ? 'in a moment' : null };
 }
 function setCarplayCards(b) {
     if (typeof b.directions === 'boolean') settings.carplayDirections = b.directions;

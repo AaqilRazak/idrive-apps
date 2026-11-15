@@ -31,6 +31,16 @@ it. The mode applies at once (the hook reads it at each SETUP); never restart
 `carplay` by hand. `/run/hook111/log/` holds the status file and a plist log
 of the session (at most 500 files).
 
+Cast writes the cluster's controls to `/run/hook111/` (`url`, `viewarea`,
+`zoom`, and the size, view and safe area read at the phone's next
+connection). The scene (`url`) goes to the phone as `showUI` at each new
+stream and on a change, then again 1, 4 and 10 s later; `ui_acked=1` in the
+status means the phone answered it. Day / night follows the car's own
+`SetNightMode` (0.1.6): the cluster's `/info` record declares it and
+`setNightMode {uuid}` goes to the cluster on each change. `night=`,
+`night_car=` and `night_acked=` are in the status, and
+`echo night > /run/hook111/night` (or `day`) forces it until removed.
+
 ## Build and test
 
 ```sh
