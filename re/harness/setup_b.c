@@ -196,6 +196,64 @@ static int read_request(int fd, char *line, size_t nline, unsigned char **body, 
 
 static void set_mode(const char *path, const char *m) { FILE *f = fopen(path, "w"); if (f) { fputs(m, f); fclose(f); } }
 
+/* The phone's events side on its own thread, as a real phone: it answers each
+ * /command as it comes and queues the bodies for the test (ev_pop). Needed
+ * once one poll sends more than one command: the library's HTTP client takes
+ * one /command at a time on its event queue, so the second send waits for the
+ * phone's answer to the first. hold: answer nothing until cleared. */
+#include <poll.h>
+#define EVQ 128
+static struct { unsigned char *body[EVQ]; size_t n[EVQ]; int head, tail, fd; volatile int stop, hold; pthread_mutex_t m; pthread_cond_t c; pthread_t t; }
+    ev = { .m = PTHREAD_MUTEX_INITIALIZER, .c = PTHREAD_COND_INITIALIZER };
+static void *ev_thread(void *a) {
+    (void)a;
+    while (!ev.stop) {
+        if (ev.hold) { usleep(5000); continue; }
+        struct pollfd p = { ev.fd, POLLIN, 0 };
+        if (poll(&p, 1, 50) <= 0 || ev.hold) continue;
+        char line[256], ct[128]; unsigned char *b = NULL; size_t n = 0;
+        if (read_request(ev.fd, line, sizeof line, &b, &n, ct, sizeof ct) != 0) { free(b); continue; }
+        pthread_mutex_lock(&ev.m);
+        if (ev.tail - ev.head < EVQ) { ev.body[ev.tail % EVQ] = b; ev.n[ev.tail % EVQ] = n; ev.tail++; } else free(b);
+        pthread_cond_broadcast(&ev.c);
+        pthread_mutex_unlock(&ev.m);
+    }
+    return NULL;
+}
+static void ev_start(int fd) { ev.fd = fd; ev.stop = 0; ev.hold = 0; ev.head = ev.tail = 0; pthread_create(&ev.t, NULL, ev_thread, NULL); }
+static void ev_stop(void) { ev.stop = 1; pthread_join(ev.t, NULL); }
+/* the next command the phone got, within ms: 0, or -1 */
+static int ev_pop(unsigned char **b, size_t *n, int ms) {
+    struct timespec t; clock_gettime(CLOCK_REALTIME, &t);
+    t.tv_sec += ms / 1000; t.tv_nsec += (long)(ms % 1000) * 1000000L;
+    if (t.tv_nsec >= 1000000000L) { t.tv_sec++; t.tv_nsec -= 1000000000L; }
+    pthread_mutex_lock(&ev.m);
+    while (ev.head == ev.tail) if (pthread_cond_timedwait(&ev.c, &ev.m, &t) != 0) break;
+    int got = ev.head != ev.tail;
+    if (got) { *b = ev.body[ev.head % EVQ]; *n = ev.n[ev.head % EVQ]; ev.head++; }
+    pthread_mutex_unlock(&ev.m);
+    return got ? 0 : -1;
+}
+static int ev_pending(void) { pthread_mutex_lock(&ev.m); int k = ev.tail - ev.head; pthread_mutex_unlock(&ev.m); return k; }
+
+/* hook111's poll clock, stepped by the test (ui_clock) */
+static long long fake_ms;
+static long long fake_clock(void) { return fake_ms; }
+/* a counter reaching want within a second (the phone's answers arrive on the event queue) */
+static int wait_for(volatile int *v, int want) { for (int i = 0; i < 100 && *v < want; i++) usleep(10000); return *v >= want; }
+/* the latest send of a kind (ACK_UI / ACK_NIGHT) answered within a second */
+static int wait_acked(int kind) { for (int i = 0; i < 100 && ack_got[kind] != ack_seq[kind]; i++) usleep(10000); return ack_got[kind] == ack_seq[kind] && ack_rc[kind] == 0; }
+/* a key=value line in the status file */
+static int status_has(const char *dir, const char *line) {
+    char p[700], l[600]; snprintf(p, sizeof p, "%s/status", dir);
+    status_now(1);
+    FILE *f = fopen(p, "r"); int said = 0;
+    while (f && fgets(l, sizeof l, f)) { l[strcspn(l, "\n")] = 0; if (!strcmp(l, line)) said = 1; }
+    if (f) fclose(f);
+    if (!said) printf("  status has no \"%s\"\n", line);
+    return said;
+}
+
 static void sink_reset(void) {
     got_avcc_n = 0; got_start = got_stop = got_frames = bad_frames = 0;
     for (int i = 0; i < 16; i++) { free(want[i]); want[i] = NULL; }
@@ -582,10 +640,12 @@ int main(int argc, char **argv) {
         char uf[640], vf[640], zf[640];
         snprintf(uf, sizeof uf, "%s.url", logdir); snprintf(vf, sizeof vf, "%s.viewarea", logdir); snprintf(zf, sizeof zf, "%s.zoom", logdir);
         hook111_url_file(uf); hook111_viewarea_file(vf); hook111_zoom_file(zf);
-        #define NEXT_CMD(typevar, parvar) do { free(body); body = NULL; got = read_request(sv[1], line, sizeof line, &body, &nbody, ctype, sizeof ctype); \
+        #define NEXT_CMD(typevar, parvar) do { free(body); body = NULL; got = ev_pop(&body, &nbody, 3000); \
             cmd = got == 0 ? FN(CF (*)(const void *, size_t, int *), 0x13a550)(body, nbody, &perr2) : NULL; \
             typevar = cmd ? CFDictGetTyped(cmd, K_TYPE, CFStrTypeID(), &err) : NULL; parvar = cmd ? CFDictGetTyped(cmd, K_PARAMS, CFDictTypeID(), &err) : NULL; } while (0)
         CF ty = NULL, pa = NULL, uu = CFStr(test_disp.uuid);
+        ev_start(sv[1]);   /* the phone answers on its own from here to the block's end */
+        ui_clock = fake_clock; fake_ms = 100000;   /* frozen unless a test steps it: no repeat falls due */
         current_b->started = 1;
         ui_poll(current_b, 1);
         CHECK("scene: no url file, nothing sent", hook111_stats.ui_sent == 0);
@@ -607,6 +667,64 @@ int main(int argc, char **argv) {
         ui_poll(current_b, 1);
         NEXT_CMD(ty, pa);
         CHECK("scene: a new stream gets the URL again", ty && CFEqual(ty, CFStr("showUI")) && hook111_stats.ui_sent == 3);
+
+        /* the phone's answer: the library's completion, on the event queue */
+        CHECK("scene: the phone's answer (200) is seen, the latest showUI acknowledged (ui_acked=1)",
+              wait_acked(ACK_UI) && hook111_stats.ui_acks >= 1 && hook111_stats.ui_ack_rc == 0 && ui_acked_now() && status_has(logdir, "ui_acked=1"));
+
+        /* the repeats after a fresh send: 1, 4 and 10 s after it, the same URL, then none */
+        {
+            const char *U2 = "maps:/car/instrumentcluster/map?showETA=yes";
+            int c0 = hook111_stats.commands_sent, r0 = hook111_stats.ui_resent, ok_urls = 1, ok_quiet = 1;
+            static const struct { int at, sends; } steps[] = {
+                { 500, 0 }, { 999, 0 }, { 1000, 1 }, { 1500, 0 }, { 3999, 0 }, { 4000, 1 }, { 9999, 0 }, { 10000, 1 }, { 20000, 0 }, { 60000, 0 } };
+            long long t0 = fake_ms;
+            for (unsigned i = 0; i < sizeof steps / sizeof *steps; i++) {
+                int before = hook111_stats.commands_sent;
+                fake_ms = t0 + steps[i].at;
+                ui_poll(current_b, 1);
+                int sent = hook111_stats.commands_sent - before;
+                if (sent != steps[i].sends) { ok_quiet = 0; printf("  at +%d ms: %d sent, expected %d\n", steps[i].at, sent, steps[i].sends); }
+                if (sent) {
+                    NEXT_CMD(ty, pa);
+                    if (!(ty && CFEqual(ty, CFStr("showUI")) && pa && CFEqual(CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err), uu) &&
+                          CFEqual(CFDictGetTyped(pa, K_URL, CFStrTypeID(), &err), CFStr(U2)))) ok_urls = 0;
+                }
+            }
+            CHECK("scene repeats: the same showUI {uuid, url} again at +1 s, +4 s and +10 s, nothing between or after",
+                  ok_quiet && ok_urls && hook111_stats.commands_sent - c0 == 3 && hook111_stats.ui_resent - r0 == 3);
+            CHECK("scene repeats: the latest one acknowledged", wait_acked(ACK_UI) && ui_acked_now());
+            /* a change mid-schedule starts it again: at once, then +1 s */
+            set_mode(uf, "maps:/car/instrumentcluster?showETA=yes&maneuverLayout=topAligned");
+            fake_ms += 1000;
+            ui_poll(current_b, 1);
+            NEXT_CMD(ty, pa);
+            int fresh_ok = ty && CFEqual(ty, CFStr("showUI")) && CFEqual(CFDictGetTyped(pa, K_URL, CFStrTypeID(), &err), CFStr("maps:/car/instrumentcluster?showETA=yes&maneuverLayout=topAligned"));
+            fake_ms += 1000;
+            ui_poll(current_b, 1);
+            NEXT_CMD(ty, pa);
+            CHECK("scene: a change is sent at once and its own repeats start (+1 s)",
+                  fresh_ok && ty && CFEqual(ty, CFStr("showUI")) && CFEqual(CFDictGetTyped(pa, K_URL, CFStrTypeID(), &err), CFStr("maps:/car/instrumentcluster?showETA=yes&maneuverLayout=topAligned")));
+            /* the 500 ms limit when not forced (the pump's and the commands' polls) */
+            int c1 = hook111_stats.commands_sent;
+            fake_ms += 3000;                       /* the +4 s repeat is due */
+            ui_poll(current_b, 0);                 /* > 500 ms since the last: runs */
+            int first = hook111_stats.commands_sent - c1;
+            NEXT_CMD(ty, pa);
+            set_mode(uf, "maps:/car/instrumentcluster/map?showETA=yes");
+            fake_ms += 499;
+            ui_poll(current_b, 0);                 /* within 500 ms: waits */
+            int held = hook111_stats.commands_sent - c1 == 1;
+            fake_ms += 1;
+            ui_poll(current_b, 0);
+            NEXT_CMD(ty, pa);
+            CHECK("scene: unforced polls at most every 500 ms (a change waits for the next)",
+                  first == 1 && held && hook111_stats.commands_sent - c1 == 2 && ty && CFEqual(CFDictGetTyped(pa, K_URL, CFStrTypeID(), &err), CFStr(U2)));
+            /* settle: let the new URL's repeats run out, frozen after */
+            for (int k = 0; k < 3; k++) { fake_ms += 10000; ui_poll(current_b, 1); NEXT_CMD(ty, pa); }
+            fake_ms += 60000; int c2 = hook111_stats.commands_sent; ui_poll(current_b, 1);
+            CHECK("scene: after its three repeats, quiet", hook111_stats.commands_sent == c2);
+        }
         /* the view area: needs both offered at /info */
         offered_viewareas = 1; ui_va_sent = 0;
         set_mode(vf, "1");
@@ -655,6 +773,140 @@ int main(int argc, char **argv) {
             if (sf) fclose(sf);
             CHECK("the status says which scene the phone took", said);
         }
+        unlink(zf);   /* the zoom request left waiting above */
+
+        /* ---- polled from the phone's commands, not only from frames ---- */
+        current_b->started = 1;
+        set_mode(uf, "maps:/car/instrumentcluster?showETA=no");
+        fake_ms += 1000;
+        FN(int (*)(void *, int, CF, CF, CF, CF *), 0x183bf0)(session, 1, CFStr("updateFeedback"), NULL, NULL, &sresp);   /* as /command does */
+        NEXT_CMD(ty, pa);
+        CHECK("a phone command (updateFeedback) polls the scene: a change goes out with no frame",
+              ty && CFEqual(ty, CFStr("showUI")) && pa && CFEqual(CFDictGetTyped(pa, K_URL, CFStrTypeID(), &err), CFStr("maps:/car/instrumentcluster?showETA=no")));
+        for (int k = 0; k < 3; k++) { fake_ms += 10000; ui_poll(current_b, 1); NEXT_CMD(ty, pa); }   /* its repeats, out of the way */
+
+        /* ---- day / night ---- */
+        {
+            char nf[640]; snprintf(nf, sizeof nf, "%s.night", logdir);
+            hook111_night_file(nf);
+            int (*set_night)(void *, int, void *, void *) = FN(int (*)(void *, int, void *, void *), 0x1846d0);   /* the library's own entry */
+            int (*cinemo_night)(void *, void *, int) = FN(int (*)(void *, void *, int), 0x10f900);           /* its only caller, Cinemo's */
+            CHECK("the library's booleans: CF_FALSE is the parsed false, CF_TRUE another",
+                  CF_FALSE && CF_TRUE && CF_FALSE == cf_false() && CF_TRUE != CF_FALSE && !CFEqual(CF_TRUE, CF_FALSE));
+            int c0 = hook111_stats.commands_sent;
+            fake_ms += 1000; ui_poll(current_b, 1);
+            CHECK("night: nothing known (no SetNightMode, no /info value, no file): nothing sent", hook111_stats.commands_sent == c0 && night_now() < 0);
+
+            /* the car's SetNightMode(night): the stock command, then ours for the second display */
+            int calls0 = hook111_stats.night_calls;
+            int rc = set_night(session, 1, NULL, NULL);
+            int e = 0;
+            NEXT_CMD(ty, pa);
+            CHECK("car night: the stock setNightMode {nightMode: true} still goes out, no uuid (the main screen), and nothing else from the car's call",
+                  rc == 0 && ty && CFEqual(ty, CFStr("setNightMode")) && pa && CFDictGetI64(pa, K_NIGHT, &e) == 1 && !e &&
+                  !CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err) && hook111_stats.night_calls == calls0 + 1 && hook111_stats.night_sent == 0);
+            fake_ms += 1000;
+            ev.hold = 1; usleep(100000);   /* the phone holds its answer */
+            FN(int (*)(void *, int, CF, CF, CF, CF *), 0x183bf0)(session, 1, CFStr("updateFeedback"), NULL, NULL, &sresp);   /* the phone's next command */
+            usleep(100000);
+            CHECK("car night: our setNightMode not acknowledged before the phone answers", !night_acked_now() && hook111_stats.night_sent == 1);
+            ev.hold = 0;
+            NEXT_CMD(ty, pa);
+            e = 0;
+            CHECK("car night: the phone's next command sends setNightMode {uuid: the second display, nightMode: true}",
+                  ty && CFEqual(ty, CFStr("setNightMode")) && pa && CFEqual(CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err), uu) &&
+                  CFDictGetI64(pa, K_NIGHT, &e) == 1 && !e && hook111_stats.night_sent == 1);
+            CHECK("car night: acknowledged; the status says night, from the car", wait_acked(ACK_NIGHT) &&
+                  status_has(logdir, "night=night") && status_has(logdir, "night_car=night") && status_has(logdir, "night_acked=1"));
+
+            /* repeats, as the scene's */
+            int c1 = hook111_stats.commands_sent, rep_ok = 1;
+            static const int at[] = { 1000, 4000, 10000 };
+            long long t0 = fake_ms;
+            for (int k = 0; k < 3; k++) {
+                fake_ms = t0 + at[k]; ui_poll(current_b, 1); NEXT_CMD(ty, pa); e = 0;
+                if (!(ty && CFEqual(ty, CFStr("setNightMode")) && CFDictGetI64(pa, K_NIGHT, &e) == 1 && !e)) rep_ok = 0;
+            }
+            fake_ms = t0 + 60000; ui_poll(current_b, 1);
+            CHECK("car night: repeated at +1, +4 and +10 s, then quiet", rep_ok && hook111_stats.commands_sent - c1 == 3);
+
+            /* the same value again: the stock one only */
+            c1 = hook111_stats.commands_sent;
+            set_night(session, 1, NULL, NULL);
+            NEXT_CMD(ty, pa);
+            fake_ms += 1000; ui_poll(current_b, 1);
+            CHECK("car night again: only the stock command (ours already says night)", hook111_stats.commands_sent - c1 == 0 &&
+                  ty && !CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err));
+
+            /* day, through Cinemo's own caller (ios_in_the_car_set_night_mode) */
+            c1 = hook111_stats.commands_sent;
+            cinemo_night(session, NULL, 0);
+            NEXT_CMD(ty, pa);
+            int stock_day = ty && CFEqual(ty, CFStr("setNightMode")) && (e = 0, CFDictGetI64(pa, K_NIGHT, &e) == 0) && !e && !CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err);
+            fake_ms += 1000; ui_poll(current_b, 0);   /* the pump's poll */
+            NEXT_CMD(ty, pa);
+            CHECK("car day, through Cinemo's ios_in_the_car_set_night_mode: stock {nightMode: false}, then ours with the uuid",
+                  stock_day && ty && CFEqual(ty, CFStr("setNightMode")) && CFEqual(CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err), uu) &&
+                  (e = 0, CFDictGetI64(pa, K_NIGHT, &e) == 0) && !e && hook111_stats.commands_sent - c1 == 1 && night_car == 0);
+            for (int k = 0; k < 3; k++) { fake_ms += 10000; ui_poll(current_b, 1); NEXT_CMD(ty, pa); }
+
+            /* the night file: forces it over the car's; anything else follows the car */
+            set_mode(nf, "night\n");
+            fake_ms += 1000; ui_poll(current_b, 1);
+            NEXT_CMD(ty, pa);
+            CHECK("night file \"night\" (the car says day): setNightMode {uuid, true}", ty && CFEqual(ty, CFStr("setNightMode")) &&
+                  CFEqual(CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err), uu) && (e = 0, CFDictGetI64(pa, K_NIGHT, &e) == 1) && status_has(logdir, "night=night") && status_has(logdir, "night_car=day"));
+            for (int k = 0; k < 3; k++) { fake_ms += 10000; ui_poll(current_b, 1); NEXT_CMD(ty, pa); }
+            set_mode(nf, "dusk");
+            fake_ms += 1000; ui_poll(current_b, 1);
+            NEXT_CMD(ty, pa);
+            CHECK("night file anything else (\"dusk\"): back to the car's day", ty && CFEqual(ty, CFStr("setNightMode")) && (e = 0, CFDictGetI64(pa, K_NIGHT, &e) == 0) && !e);
+            for (int k = 0; k < 3; k++) { fake_ms += 10000; ui_poll(current_b, 1); NEXT_CMD(ty, pa); }
+            unlink(nf);
+
+            /* a change before screen B streams waits for it; a new stream gets both again */
+            current_b->started = 0;
+            c1 = hook111_stats.commands_sent;
+            set_night(session, 1, NULL, NULL);
+            NEXT_CMD(ty, pa);
+            int waited = hook111_stats.commands_sent - c1 == 0 && night_car == 1;
+            ui_reset();
+            current_b->started = 1;
+            fake_ms += 1000; ui_poll(current_b, 1);
+            CF t1 = NULL, p1 = NULL;
+            NEXT_CMD(t1, p1);
+            NEXT_CMD(ty, pa);
+            CHECK("car night before the stream: only the stock one; at the stream, showUI then setNightMode {uuid, true}",
+                  waited && t1 && CFEqual(t1, CFStr("showUI")) && ty && CFEqual(ty, CFStr("setNightMode")) &&
+                  CFEqual(CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err), uu) && (e = 0, CFDictGetI64(pa, K_NIGHT, &e) == 1) && !e);
+            for (int k = 0; k < 3; k++) { fake_ms += 10000; ui_poll(current_b, 1); NEXT_CMD(t1, p1); NEXT_CMD(ty, pa); }
+            (void)p1;
+
+            /* mode off: the car's value is kept, nothing of ours sent */
+            set_mode(modefile, "off");
+            c1 = hook111_stats.commands_sent;
+            set_night(session, 0, NULL, NULL);
+            NEXT_CMD(ty, pa);
+            CHECK("mode off: the stock setNightMode only, the value kept (day)", hook111_stats.commands_sent - c1 == 0 && night_car == 0 &&
+                  ty && CFEqual(ty, CFStr("setNightMode")) && !CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err));
+            set_mode(modefile, "full");
+            fake_ms += 1000; ui_poll(current_b, 1);
+            NEXT_CMD(ty, pa);
+            CHECK("back on: the kept value goes to the second display (day)", ty && CFEqual(ty, CFStr("setNightMode")) &&
+                  CFEqual(CFDictGetTyped(pa, K_UUID, CFStrTypeID(), &err), uu) && (e = 0, CFDictGetI64(pa, K_NIGHT, &e) == 0) && !e);
+            for (int k = 0; k < 3; k++) { fake_ms += 10000; ui_poll(current_b, 1); NEXT_CMD(ty, pa); }
+            fake_ms += 60000; c1 = hook111_stats.commands_sent; ui_poll(current_b, 1);
+            CHECK("day / night: quiet once settled", hook111_stats.commands_sent == c1 && wait_for(&hook111_stats.night_acks, 1));
+            hook111_night_file(NULL);
+        }
+        current_b->started = 0;
+        ui_clock = mono_ms;
+        usleep(200000);
+        {
+            int extra = ev_pending();
+            CHECK("the phone got nothing the checks above didn't read", extra == 0);
+        }
+        ev_stop();
         unlink(uf); unlink(vf); unlink(zf);
         hook111_url_file(NULL); hook111_viewarea_file(NULL); hook111_zoom_file(NULL);
         #undef NEXT_CMD
@@ -707,6 +959,7 @@ int main(int argc, char **argv) {
     unsigned char *cfg = calloc(1, 0x1000);
     pthread_mutex_init((pthread_mutex_t *)(cfg + 0x8e8), NULL);
     *(void **)(cfg + 0x818) = &provider;
+    *(int *)(cfg + 0x840) = -1;   /* Cinemo's night mode (0x18d610): not set by the car yet */
     int perr = 0;
     CF displays = FN(CF (*)(void *, CF, void *, int *, void *), 0x10d270)(NULL, K_DISPLAYS, NULL, &perr, cfg);
     int nd = displays && CFTypeOf(displays) == CFArrayTypeID() ? CFArrayCount(displays) : -1;
@@ -720,6 +973,41 @@ int main(int argc, char **argv) {
         CHECK("second record: 1088x480, features 2", CFDictGetI64(d1, K_WPX, &e) == 1088 && CFDictGetI64(d1, K_HPX, &e) == 480 && CFDictGetI64(d1, K_FEATURES, &e) == 2 && !e);
         CF urls = CFDictGetTyped(d1, CFStr("altScreenSuggestUIURLs"), CFArrayTypeID(), &e);
         CHECK("second record: 3 altScreenSuggestUIURLs", urls && CFArrayCount(urls) == 3);
+    }
+    /* day / night in /info: the second record declares its own nightMode */
+    {
+        #define INFO() ({ int pe_ = 0; CF dd_ = FN(CF (*)(void *, CF, void *, int *, void *), 0x10d270)(NULL, K_DISPLAYS, NULL, &pe_, cfg); \
+                          dd_ && CFTypeOf(dd_) == CFArrayTypeID() && CFArrayCount(dd_) == 2 ? dd_ : NULL; })
+        #define NIGHT_OF(rec, ev) (ev = 0, CFDictGetI64(rec, K_NIGHT, &ev))
+        int e = 0;
+        CF dd = INFO();
+        int64_t n1 = dd ? NIGHT_OF(CFArrayAt(dd, 1), e) : -9;
+        CHECK("/info, the car said day (SetNightMode): the second record nightMode false", dd && n1 == 0 && !e && status_has(logdir, "night_offered=day"));
+        night_car = -1;
+        dd = INFO();
+        if (dd) (void)NIGHT_OF(CFArrayAt(dd, 1), e);
+        CHECK("/info, nothing known: no nightMode in the second record", dd && e != 0 && night_info == -1 && status_has(logdir, "night_offered=none"));
+        /* the car is at night as the phone connects: Cinemo's mode (config +0x840) is 1 */
+        *(int *)(cfg + 0x840) = 1;
+        int pe = 0;
+        CF top = FN(CF (*)(void *, CF, void *, int *, void *), 0x10d270)(NULL, K_NIGHTPROP, NULL, &pe, cfg);   /* /info's own nightMode */
+        CHECK("/info's top-level nightMode (stock): true from Cinemo's mode", top && CFEqual(top, CF_TRUE) && !pe);
+        dd = INFO();
+        n1 = dd ? NIGHT_OF(CFArrayAt(dd, 1), e) : -9;
+        CHECK("/info, Cinemo's mode night and no SetNightMode yet: the second record nightMode true",
+              dd && n1 == 1 && !e && status_has(logdir, "night_info=night") && status_has(logdir, "night_offered=night"));
+        night_car = 0;   /* then a SetNightMode said day (and Cinemo's mode not yet changed: stale) */
+        dd = INFO();
+        n1 = dd ? NIGHT_OF(CFArrayAt(dd, 1), e) : -9;
+        CHECK("/info, the car's SetNightMode (day) wins over Cinemo's mode (night)", dd && n1 == 0 && !e);
+        *(int *)(cfg + 0x840) = 0; night_car = -1;
+        dd = INFO();
+        n1 = dd ? NIGHT_OF(CFArrayAt(dd, 1), e) : -9;
+        CHECK("/info, Cinemo's mode day: the second record nightMode false", dd && n1 == 0 && !e && night_info == 0);
+        *(int *)(cfg + 0x840) = -1;
+        night_car = -1; night_info = -1;
+        #undef INFO
+        #undef NIGHT_OF
     }
     /* ---------- the second display's size, per target (/run/hook111/display) ---------- */
     {

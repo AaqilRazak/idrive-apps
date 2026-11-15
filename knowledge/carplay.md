@@ -17,6 +17,15 @@ Measured on one unit (head unit software `I_21w12.2-1-4`, CarPlay `20.40.2`) unl
   the matching records makes it refuse every session. Keyframe requests for
   111 must name the display (`forceKeyFrame {uuid}`). Answering `suggestUI`
   with a guessed `showUI` makes it give up the main screen.
+- Day / night reaches CarPlay as one session command, `setNightMode
+  {nightMode}` with no display (`AirPlayReceiverSessionSetNightMode`, from
+  Cinemo's `SetNightMode`, which the light sensor drives). The cluster stayed
+  in the mode it connected in (issue #1). hook111 0.1.6 declares the
+  cluster's own `nightMode` in `/info` and repeats the command with its
+  `uuid`, as luka-dev/mib2q-carplay-rgi does (untested on this car).
+- The library sends one `/command` at a time: the next waits for the
+  phone's answer to the last
+  ([findings](../re/findings-20.40.2.md), "The scene again, and day / night").
 - Swapping the 2022 `carplay` / `libNmeCarPlay` onto this firmware is
   **untested** (`carplay` loads about 90 libraries, many version-tagged to
   this firmware).

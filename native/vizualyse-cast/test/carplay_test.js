@@ -177,7 +177,20 @@ function unit() {
         fs.readFileSync(path.join(crun, 'view'), 'utf8') === 'map\n');
     fs.writeFileSync(path.join(crun, 'log', 'status'), 'ui_url=' + U + '/map?showETA=yes\nviewarea=1\n');
     sc = cp.wantScene({ directions: false, eta: true, wide: true }, crun);
-    ok('scene: sent once hook111 says the phone took it', sc.sent && cp.state(crun).uiUrl === U + '/map?showETA=yes' && cp.state(crun).viewarea === 1);
+    ok('scene: sent once hook111 (0.1.5, no ui_acked line) says it sent it', sc.sent && cp.state(crun).uiUrl === U + '/map?showETA=yes' &&
+        cp.state(crun).viewarea === 1 && cp.state(crun).uiAcked === null);
+    /* hook111 0.1.6: sent is not enough, the phone has to answer */
+    fs.writeFileSync(path.join(crun, 'log', 'status'), 'ui_url=' + U + '/map?showETA=yes\nui_acked=0\nui_resent=1\nnight=night\nnight_car=day\nnight_acked=0\n');
+    sc = cp.wantScene({ directions: false, eta: true, wide: true }, crun);
+    let cs = cp.state(crun);
+    ok('scene (hook111 0.1.6): sent but the phone not answered yet: not taken', !sc.sent && cs.uiAcked === false && !cp.sceneTaken(cs, U + '/map?showETA=yes'));
+    ok('day / night (hook111 0.1.6): what it is now, what the car said, not yet answered', cs.night === 'night' && cs.nightCar === 'day' && cs.nightAcked === false);
+    fs.writeFileSync(path.join(crun, 'log', 'status'), 'ui_url=' + U + '/map?showETA=yes\nui_acked=1\nnight=none\nnight_car=none\nnight_acked=1\n');
+    sc = cp.wantScene({ directions: false, eta: true, wide: true }, crun);
+    cs = cp.state(crun);
+    ok('scene (hook111 0.1.6): answered: taken', sc.sent && cs.uiAcked === true && cp.sceneTaken(cs, U + '/map?showETA=yes') && !cp.sceneTaken(cs, U + '/map'));
+    ok('day / night: none known reads as null', cs.night === null && cs.nightCar === null && cs.nightAcked === true);
+    fs.writeFileSync(path.join(crun, 'log', 'status'), 'ui_url=' + U + '/map?showETA=yes\nviewarea=1\n');
     ok('scene: no hook111 run directory, nothing written', cp.wantScene({ directions: true, eta: true }, path.join(crun, 'nope')) === null);
     ok('zoom: "in" written for hook111 to take', cp.requestZoom('in', crun) === true && fs.readFileSync(path.join(crun, 'zoom'), 'utf8') === 'in\n');
     let zthrew = null;
@@ -301,6 +314,8 @@ async function server(cluster) {
         for (let i = 0; i < 50 && !st; i++) { await sleep(100); try { const r = await get(PORT, '/api/status', token); if (r.code === 200) st = JSON.parse(r.body); } catch (e) { /* not yet */ } }
         ok('server: up; status has the CarPlay second screen, nothing of the mirror', st && st.carplay && st.carplay.armed === true && st.carplay.ready === false &&
             !('crops' in st) && !('screen' in st) && !('screenSize' in st) && !('crop' in st));
+        ok('server: status says the cluster\'s day / night (none known yet: null)', st && st.carplay && st.carplay.night &&
+            st.carplay.night.now === null && st.carplay.night.car === null && st.carplay.night.acked === null);
         ok('server: no screen snapshot any more', (await get(PORT, '/api/screen.jpg', token)).code === 404);
         let r = await post(PORT, '/api/play', token, { source: 'carplay', output: 'map' });
         ok('play the second screen with hook111 in mode off: refused, says why', r.code === 400 && /mode off/.test(JSON.parse(r.body).error));

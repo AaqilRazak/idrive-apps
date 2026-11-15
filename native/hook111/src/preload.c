@@ -70,6 +70,7 @@ static void try_install(const char *why) {
             hook111_url_file("/run/hook111/url");             /* the cluster scene (showUI), from vizualyse-cast */
             hook111_viewarea_file("/run/hook111/viewarea");   /* 0 centred, 1 Maps' own layout */
             hook111_zoom_file("/run/hook111/zoom");           /* in / out requests */
+            hook111_night_file("/run/hook111/night");         /* day / night forced; missing: the car's */
             const char *td = getenv("HOOK111_TRIAL_DIR");
             hook111_trial_dir(td ? td : "/run/hook111");                /* the bench's trial files */
             int rc = hook111_install(b, sink_annexb(&sink_state, (uint16_t)port), &display);
