@@ -4,12 +4,14 @@
  * The app's side of the vizualyse-moonlight tool's control socket:
  * /dev/shm/vizualyse-moonlight/ctl.sock, a Unix stream socket,
  * newline-delimited JSON. The tool sends {"ev":"status", ...} on connect,
- * after every command and once a second, and {"ev":"error","error":…} for a
- * failed command; the app sends {"cmd":"enable"}, {"cmd":"disable"},
+ * after every command and once a second, {"ev":"error","error":...} for a
+ * failed command and {"ev":"list"} when the touch screen's List corner is
+ * tapped (back to the list); the app sends {"cmd":"enable"}, {"cmd":"disable"},
  * {"cmd":"stop"} (stop streaming, the game keeps running on the PC),
  * {"cmd":"quit"} (stop and close the game on the PC), {"cmd":"resume"}
  * (the last host and game again), {"cmd":"output","output":...} (where the
- * picture goes: console, map or hud) and {"cmd":"speed","kmh":...} (the car's
+ * picture goes: console, map or hud), {"cmd":"touch","on":bool} (the touch
+ * screen over the app's screen state) and {"cmd":"speed","kmh":...} (the car's
  * speed, about once a second, for "only while parked"). Connected while the
  * app runs (the speed goes on while a stream covers the page), retried once
  * a second; the tool keeps running without it.
@@ -66,6 +68,8 @@ class MoonlightControl extends EventEmitter {
                 try { ev = JSON.parse(line); } catch (e) { continue; }
                 if (!ev) continue;
                 if (ev.ev === 'status') { this.status = ev; this.emit('change'); }
+                /* the touch screen's List corner: back to the list */
+                else if (ev.ev === 'list') this.emit('list');
                 else if (ev.ev === 'error') {
                     this.lastError = { text: String(ev.error || 'the command failed'), at: Date.now() };
                     this.emit('change');
@@ -95,6 +99,13 @@ class MoonlightControl extends EventEmitter {
     quit() { return this._send({ cmd: 'quit' }); }
     resume() { return this._send({ cmd: 'resume' }); }
     output(id) { return this._send({ cmd: 'output', output: id }); }
+    showTouch() { return this._send({ cmd: 'touch', on: true }); }
+    /* not a button: it leaves a button's error on the status line alone */
+    hide() {
+        if (!this.sock || !this.status || !(this.status.touch || this.status.touchWanted)) return false;
+        this.sock.write(JSON.stringify({ cmd: 'touch', on: false }) + '\n');
+        return true;
+    }
     /* not a button: it leaves a button's error on the status line alone */
     speed(kmh) {
         if (!this.sock || !this.status) return false;
@@ -103,6 +114,9 @@ class MoonlightControl extends EventEmitter {
     }
 
     connected() { return !!this.status; }
+    /* the touch screen is up (the tool's picture over the app area) */
+    shown() { return !!(this.status && this.status.touch); }
+    moving() { return !!(this.status && this.status.moving); }
     enabled() { return !(this.status && this.status.enabled === false); }
     link() { return (this.status && this.status.link) || ''; }
     state() { return (this.status && this.status.state) || 'idle'; }
@@ -119,21 +133,22 @@ class MoonlightControl extends EventEmitter {
 
     statusText() {
         const s = this.status;
-        if (!s) return 'The Moonlight tool is not running — install Moonlight (the tool) from the Store';
-        if (s.enabled === false) return 'Off — turn Moonlight on to use it';
+        if (!s) return 'The Moonlight tool is not running - install Moonlight (the tool) from the Store';
+        if (s.enabled === false) return 'Off - turn Moonlight on to use it';
         const failed = this._commandError();
         if (failed) return 'Error: ' + failed;
+        if (s.touch) return 'The touch screen is up - List (top right) or the back arrow returns here';
         const host = s.host && s.host.name ? s.host.name : '';
         const game = s.app && s.app.name ? s.app.name : '';
         const what = game + (game && host ? ' from ' : '') + host;
-        if (s.state === 'streaming') return 'Streaming ' + (what || 'a game') + ' — ' + (s.seconds || 0) + ' s';
-        if (s.state === 'starting') return 'Starting ' + (what || 'the stream') + '…';
+        if (s.state === 'streaming') return 'Streaming ' + (what || 'a game') + ' - ' + (s.seconds || 0) + ' s';
+        if (s.state === 'starting') return 'Starting ' + (what || 'the stream') + '...';
         if (s.state === 'error') return 'Error: ' + (s.error || 'the stream failed');
-        if (s.state === 'ended') return 'Ended' + (what ? ': ' + what : '') + (s.note ? ' — ' + s.note : '');
-        if (s.moving) return 'Only while parked — the car is moving (' + s.speed + ' km/h)';
-        if (!s.link) return 'Waiting for the phone’s hotspot (uplink ' + (s.uplink || 'unknown') + ')';
+        if (s.state === 'ended') return 'Ended' + (what ? ': ' + what : '') + (s.note ? ' - ' + s.note : '');
+        if (s.moving) return 'Only while parked - the car is moving (' + Math.round(s.speed * 0.621371) + ' mph)';
+        if (!s.link) return "Waiting for the phone's hotspot (uplink " + (s.uplink || 'unknown') + ')';
         if (s.note) return s.note;
-        return 'Ready — scan the QR code to pair and pick a game';
+        return 'Ready - scan the QR code to pair and pick a game';
     }
 
     infoText() {
@@ -148,11 +163,11 @@ class MoonlightControl extends EventEmitter {
             if (s.app) parts.push(s.app.name || '?');
             if (s.state === 'streaming') parts.push((s.fps || 0) + ' fps' + (s.decoder ? (/^msdk \(GPU/.test(s.decoder) ? ' (GPU)' : ' (software)') : ''));
             parts.push(padText);
-            return parts.join(' · ');
+            return parts.join(' - ');
         }
         const parts = ['Uplink ' + (s.uplink || 'unknown'), 'renderer ' + (s.render || 'unknown'), padText];
         if (s.last) parts.push('last: ' + (s.last.app || '?') + ' on ' + (s.last.host || '?'));
-        return parts.join(' · ');
+        return parts.join(' - ');
     }
 }
 

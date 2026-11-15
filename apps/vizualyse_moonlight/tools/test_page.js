@@ -10,7 +10,12 @@
  *   node tools/test_page.js
  *
  * Covers: application.xml and uiDescription.json agree and the app binds
- * every button; with no tool the status says so and the buttons are off;
+ * every button, the screen state has nothing to press, the texts are ASCII;
+ * with no tool the status says so and the buttons are off; entered, the
+ * touch screen opens by itself (the empty screen state, then
+ * {"cmd":"touch","on":true}); {"ev":"list"} closes it to the page; the
+ * Touch screen row opens it again; BACK hides it; the car moving closes it
+ * and turns the row off;
  * connected and idle, the link is written and shown as a QR PNG (a new file
  * per link, the old handle released); Resume last follows canResume and
  * sends resume; Stop and Quit game follow the stream and send stop and quit;
@@ -41,9 +46,10 @@ const PKG = path.join(ROOT, STAGED);
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, 'mgu-app.json'), 'utf8'));
 const UI_DIR = path.join(PKG, 'rhmiData', 'uiDescriptions', 'ID7');
 const UI = JSON.parse(fs.readFileSync(path.join(UI_DIR, 'uiDescription.json'), 'utf8'));
-const XML = fs.readFileSync(path.join(UI_DIR, 'application.xml'), 'utf8');
+const XML = fs.readFileSync(path.join(UI_DIR, 'application.xml'), 'utf8').replace(/\r\n/g, '\n');   /* a Windows checkout's CRLF */
 const APP_JSON = JSON.parse(fs.readFileSync(path.join(PKG, 'rhmiData', 'application.json'), 'utf8'));
 const STATE = 'ST_OnlineApps_VizualyseMoonlight';
+const SCREEN = 'ST_OnlineApps_VizualyseMoonlightScreen';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function until(what, check, ms) {
@@ -91,6 +97,20 @@ const rhmi = new EventEmitter();
 rhmi.getByName = (n) => byName[n] || null;
 rhmi.mapEntryState = () => Promise.resolve();
 rhmi.openEntryState = () => Promise.resolve();
+/* openState: the main state goes, the state opened comes (as the HMI does) */
+const opened = [];
+rhmi.openState = (st) => {
+    opened.push(st);
+    setImmediate(() => { byName[STATE].emit('visible', { visible: false }); st.emit('visible', { visible: true }); });
+    return Promise.resolve();
+};
+/* closeState: the state goes, the main state comes */
+const closed = [];
+rhmi.closeState = (st) => {
+    closed.push(st);
+    setImmediate(() => { st.emit('visible', { visible: false }); byName[STATE].emit('visible', { visible: true }); });
+    return Promise.resolve();
+};
 rhmi.getResourceBundle = () => bundle;
 rhmi.flush = () => Promise.resolve();
 
@@ -172,6 +192,7 @@ function startFakeTool(opts) {
     server.listen(PIPE);
     return {
         broadcast() { clients.forEach((x) => send(x, status())); },
+        event(obj) { clients.forEach((x) => send(x, obj)); },
         clients() { return clients.size; },
         close() { clients.forEach((x) => x.destroy()); server.close(); },
     };
@@ -186,19 +207,35 @@ const received = [];
 let refuse = null;
 let tool = null;
 function serve() {
-    tool = startFakeTool({ status: () => st, command: (c) => { received.push(c); if (c.cmd === 'speed') return null; const r = refuse; refuse = null; return r; } });
+    tool = startFakeTool({ status: () => st, command: (c) => {
+        received.push(c);
+        if (c.cmd === 'speed') return null;
+        const r = refuse; refuse = null;
+        if (r) return r;
+        if (c.cmd === 'touch') st = Object.assign({}, st, { touch: !!c.on, touchWanted: !!c.on });
+        return null;
+    } });
 }
 const sent = (cmd) => received.some((c) => c.cmd === cmd);
+const count = (cmd, f) => received.filter((c) => c.cmd === cmd && (!f || f(c))).length;
+const press = async (name) => { await sleep(450); byName[name].emit('action'); };
 
 async function main() {
     const comps = UI.containers['1'].components;
     assert.strictEqual(UI.containers['1'].name, STATE);
     const xmlIds = (XML.match(/<component id="(\d+)"/g) || []).map((m) => m.match(/\d+/)[0]).sort();
-    assert.deepStrictEqual(Object.keys(comps).sort(), xmlIds, 'application.xml and uiDescription.json list the same components');
+    const scr = UI.containers['2'];
+    assert.deepStrictEqual(Object.keys(comps).concat(Object.keys(scr.components)).sort(), xmlIds, 'application.xml and uiDescription.json list the same components');
+    assert.strictEqual(scr.name, SCREEN);
+    assert(Object.keys(scr.components).every((id) => scr.components[id].type !== 'button' &&
+        !(scr.components[id].properties.Focusable && scr.components[id].properties.Focusable.value)), 'the screen state has nothing to press');
+    assert(/<container id="2" type="state" widget="LT_State_Wide">\n {8}<property id="9" value="1"\/>/.test(XML), 'the screen state\'s parent is the main state');
     assert.strictEqual(comps['21'].name, 'moonlightQr');
     assert(/<component id="21" type="label" widget="LT_Label_1Graphic_Scalable">/.test(XML), 'the QR is a scalable graphic label');
     const buttons = Object.keys(comps).filter((id) => comps[id].type === 'button').map((id) => comps[id].name).sort();
-    assert.deepStrictEqual(buttons, ['moonlightEnable', 'moonlightQuit', 'moonlightResume', 'moonlightStop']);
+    assert.deepStrictEqual(buttons, ['moonlightEnable', 'moonlightQuit', 'moonlightResume', 'moonlightStop', 'moonlightTouch']);
+    assert.strictEqual(UI.containers['1'].components['24'].rows[0].Text.value, 'Touch screen');
+    assert(!/[^\x00-\x7f]/.test(JSON.stringify(UI)), 'uiDescription.json is ASCII');
     const ep = APP_JSON.application.entryPoints[0];
     assert(fs.existsSync(path.join(PKG, 'rhmiData', 'variantGroups', 'Common', 'images', ep.icon)), 'the tile icon ships');
     const strings = JSON.parse(fs.readFileSync(path.join(PKG, 'rhmiData', 'variantGroups', 'Common', 'texts', 'en_GB.json'), 'utf8'));
@@ -212,19 +249,60 @@ async function main() {
     const manifest = JSON.parse(fs.readFileSync(path.join(PKG, 'manifest.json'), 'utf8'));
     const v2 = manifest.proxies['de.bmw.infotainment.vehicle.Vehicle2'];
     assert(v2 && v2.instances[0] === '1' && v2.attributes.statusCarSpeed2 === 'r', 'the manifest asks to read Vehicle2.statusCarSpeed2');
-    console.log('ok   page: 4 buttons, the output drop-down, a QR graphic, xml and uiDescription agree; tile text, icon and files[]; Vehicle2 speed in the manifest');
+    console.log('ok   page: 5 buttons, the output drop-down, a QR graphic, an empty screen state, xml and uiDescription agree; tile text, icon and files[]; Vehicle2 speed in the manifest; ASCII');
 
     process.exit = (code) => { throw new Error('process.exit(' + code + ')'); };
     runSource();
+    /* the HMI shows the entry state */
+    setTimeout(() => byName[STATE].emit('visible', { visible: true }), 50);
     const S = byName.moonlightStatus, I = byName.moonlightInfo;
     await until('no-tool status', () => /not running/.test(S.text || ''));
     assert(!logs.some((l) => /^error/.test(l)), logs.filter((l) => /^error/.test(l)).join('\n'));
-    ['moonlightEnable', 'moonlightStop', 'moonlightQuit', 'moonlightResume'].forEach((n) => assert.strictEqual(byName[n].enabled, false, n + ' disabled'));
+    ['moonlightTouch', 'moonlightEnable', 'moonlightStop', 'moonlightQuit', 'moonlightResume'].forEach((n) => assert.strictEqual(byName[n].enabled, false, n + ' disabled'));
     assert.strictEqual(byName.moonlightEnable.text, 'Moonlight: not running');
     assert.strictEqual(byName.moonlightQr.visible, false);
+    assert(!/[^\x20-\x7e]/.test(S.text), 'the status is ASCII: ' + S.text);
     console.log('ok   without the tool: "' + S.text + '", buttons disabled, no QR');
 
     serve();
+    /* entered with the tool there: the touch screen by itself; its List corner: the page */
+    await until('the screen state opened by itself', () => opened.length === 1 && opened[0] === byName[SCREEN]);
+    await until('the touch screen shown', () => count('touch', (c) => c.on === true) === 1 && /^The touch screen is up/.test(S.text || ''));
+    st = Object.assign({}, st, { touch: false, touchWanted: false });
+    tool.event({ ev: 'list' });
+    tool.broadcast();
+    await until('the page back on List', () => closed.length === 1 && closed[0] === byName[SCREEN]);
+    await sleep(600);
+    assert.strictEqual(opened.length, 1, 'the touch screen does not come back by itself after List');
+    assert.strictEqual(byName.moonlightTouch.enabled, true);
+    assert.strictEqual(byName.moonlightTouch.text, 'Touch screen');
+    console.log('ok   entered: the touch screen opens by itself (the empty screen state, then {"cmd":"touch","on":true}); {"ev":"list"} closes it to the page');
+
+    /* the Touch screen row: the screen state, then the touch screen; BACK hides it */
+    await press('moonlightTouch');
+    await until('the screen state again', () => opened.length === 2 && opened[1] === byName[SCREEN]);
+    await until('touch on sent once it is visible', () => count('touch', (c) => c.on === true) === 2 && st.touch);
+    const offs = count('touch', (c) => c.on === false);
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('touch off on BACK', () => count('touch', (c) => c.on === false) === offs + 1 && !st.touch, 1500);
+    console.log('ok   the Touch screen row opens it again; BACK hides it');
+
+    /* the car moving: the page back (the tool hides its picture itself) */
+    await press('moonlightTouch');
+    await until('the screen state for the move', () => opened.length === 3);
+    await until('shown for the move', () => st.touch);
+    st = Object.assign({}, st, { moving: true, speed: 30, touch: false, touchWanted: false });
+    tool.broadcast();
+    await until('the page back when the car moves', () => closed.length === 2);
+    await until('Touch screen off while moving', () => byName.moonlightTouch.enabled === false && byName.moonlightTouch.text === 'Touch screen (only while parked)');
+    st = Object.assign({}, st, { moving: false, speed: 0 });
+    tool.broadcast();
+    await until('Touch screen on when parked', () => byName.moonlightTouch.enabled === true);
+    console.log('ok   the car moving closes the touch screen to the page; Touch screen is off while moving');
+
+    st = Object.assign({}, st, { moving: null, speed: null });
+    tool.broadcast();
     await until('ready status', () => /^Ready/.test(S.text || ''));
     assert.strictEqual(byName.moonlightLink.text, LINK1);
     assert(/^Scan with the phone/.test(byName.moonlightHint.text));
@@ -260,7 +338,7 @@ async function main() {
     await until('speed 30 sent', () => received.some((c) => c.cmd === 'speed' && c.kmh === 30), 3000);
     st = Object.assign({}, st, { moving: true, speed: 30 });
     tool.broadcast();
-    await until('moving shown', () => /^Only while parked — the car is moving \(30 km\/h\)/.test(S.text || ''));
+    await until('moving shown', () => /^Only while parked - the car is moving \(19 mph\)/.test(S.text || ''));
     st = Object.assign({}, st, { moving: false, speed: 0 });
     speedRaw = 0;
     tool.broadcast();
@@ -283,8 +361,8 @@ async function main() {
     st = Object.assign({}, st, { state: 'streaming', frames: 1200, fps: 59, seconds: 20, pads: [{ name: 'Xbox Wireless Controller' }, { name: 'DualSense' }],
         decoder: 'msdk (GPU, API 1.24, GPU copy, Intel iHD driver)' });
     tool.broadcast();
-    await until('streaming', () => /^Streaming Forza Horizon 5 from GAMING-PC — 20 s/.test(S.text || ''));
-    await until('info', () => /^GAMING-PC \(172\.20\.10\.5\) · Forza Horizon 5 · 59 fps \(GPU\) · 2 controllers: Xbox/.test(I.text || ''));
+    await until('streaming', () => /^Streaming Forza Horizon 5 from GAMING-PC - 20 s/.test(S.text || ''));
+    await until('info', () => /^GAMING-PC \(172\.20\.10\.5\) - Forza Horizon 5 - 59 fps \(GPU\) - 2 controllers: Xbox/.test(I.text || ''));
     assert(I.text.length <= 90, 'the info line is one row');
     assert.strictEqual(byName.moonlightStop.enabled, true);
     assert.strictEqual(byName.moonlightQuit.enabled, true);
@@ -296,7 +374,7 @@ async function main() {
 
     st = Object.assign({}, st, { state: 'ended', fps: 0, note: 'the game keeps running on the PC' });
     tool.broadcast();
-    await until('ended', () => /^Ended: Forza Horizon 5 from GAMING-PC — the game keeps running on the PC/.test(S.text || ''));
+    await until('ended', () => /^Ended: Forza Horizon 5 from GAMING-PC - the game keeps running on the PC/.test(S.text || ''));
     assert.strictEqual(byName.moonlightStop.enabled, false);
     assert.strictEqual(byName.moonlightQuit.enabled, false);
     assert.strictEqual(byName.moonlightResume.enabled, true);
@@ -342,11 +420,11 @@ async function main() {
 
     st = Object.assign({}, st, { link: null, uplink: 'offline' });
     tool.broadcast();
-    await until('waiting for hotspot', () => /^Waiting for the phone’s hotspot \(uplink offline\)/.test(S.text || '') && byName.moonlightQr.visible === false);
+    await until('waiting for hotspot', () => /^Waiting for the phone's hotspot \(uplink offline\)/.test(S.text || '') && byName.moonlightQr.visible === false);
     st = Object.assign({}, st, { link: LINK2, uplink: 'online' });
     tool.broadcast();
     await until('link back', () => byName.moonlightQr.visible === true);
-    console.log('ok   no link: "Waiting for the phone’s hotspot", the QR hidden');
+    console.log('ok   no link: "Waiting for the phone\'s hotspot", the QR hidden');
 
     byName[STATE].emit('visible', { visible: false });
     const n = received.filter((c) => c.cmd === 'speed').length;
@@ -354,7 +432,7 @@ async function main() {
     assert.strictEqual(tool.clients(), 1, 'the socket stays open with the page hidden');
     assert(received.filter((c) => c.cmd === 'speed').length > n, 'the speed goes on with the page hidden');
     byName[STATE].emit('visible', { visible: true });
-    assert(!received.some((c) => !/^(speed|output|resume|stop|quit|enable|disable)$/.test(c.cmd)), 'nothing else sent');
+    assert(!received.some((c) => !/^(speed|output|resume|stop|quit|enable|disable|touch)$/.test(c.cmd)), 'nothing else sent');
     console.log('ok   hiding the page keeps the socket and the speed going');
 
     tool.close();

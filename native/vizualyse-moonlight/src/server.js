@@ -29,6 +29,12 @@
  *   source, claimed for the stream (speakers.js: the car's speakers at the
  *   iDrive volume, no CarPlay phone needed), or CarPlay's input if the
  *   speakers can't be had.
+ * - The touch screen (touch.js, the platform's touch kit): the phone page's
+ *   QR code, the stream with Stop / Quit game / Resume last, where the
+ *   picture goes and on / off, in the app area while the iDrive app's screen
+ *   state is open ({"cmd":"touch","on":true}), parked only. A stream on the
+ *   centre console hides it until the stream ends; its List corner sends
+ *   {"ev":"list"} to the app. Its model comes from memory (touchState()).
  *
  *   node server.js     (root: /dev/input, /dev/dri, the renderer, ALSA, nftables)
  */
@@ -47,6 +53,7 @@ const { startControl } = require('./control.js');
 const { fork } = require('child_process');
 const { ClusterRender } = require('./cluster_render_client.js');
 const { Speakers, CARPLAY } = require('./speakers.js');
+const { Touch } = require('./touch.js');
 
 const HERE = __dirname;
 const STATE_DIR = process.env.MOONLIGHT_STATE || '/var/opt/vizualyse-moonlight/state';
@@ -71,6 +78,10 @@ const NET_UID = Number(process.env.MOONLIGHT_NET_UID) || 12998;
 const TOUCH_IFACE = process.env.MOONLIGHT_TOUCH_IFACE !== undefined ? process.env.MOONLIGHT_TOUCH_IFACE : 'vlan73';
 const TOUCH_SRC = process.env.MOONLIGHT_TOUCH_SRC || '160.48.199.115';
 const TOUCH_FILE = process.env.MOONLIGHT_TOUCH_FILE || '';
+/* the touch screen's reader: the same touches (vlan73 on the car, unless
+ * MOONLIGHT_TOUCH_IFACE turned them off); MOONLIGHT_UI_TOUCH_CMD, a
+ * stand-in reader (the tests) */
+const UI_TOUCH_CMD = process.env.MOONLIGHT_UI_TOUCH_CMD ? JSON.parse(process.env.MOONLIGHT_UI_TOUCH_CMD) : null;
 /* Only while parked: faster than this (km/h, the iDrive app's reading) stops
  * a stream (knowledge/vehicle-data.md) */
 const MAX_KMH = 3;
@@ -271,7 +282,10 @@ function setSpeed(kmh) {
     vehicle.at = Date.now();
     if (moving() !== was) log('parked: ' + (moving() ? 'moving, ' + vehicle.kmh + ' km/h' : 'standing, ' + vehicle.kmh + ' km/h'));
     if (moving() && session) stopSession('the car is moving (' + vehicle.kmh + ' km/h): only while parked');
+    if (moving() && touch && (touch.isWanted() || touch.shown())) { touch.drop('the car is moving'); if (control) control.broadcast(); }
 }
+/* UK units, for the app's and the touch screen's texts */
+function mph(kmh) { return Math.round(kmh * 0.621371) + ' mph'; }
 
 /* ---- the stream ------------------------------------------------------------ */
 
@@ -384,8 +398,11 @@ function teardown(s) {
         try { py.kill('SIGTERM'); } catch (e) { /* gone */ }
         setTimeout(() => { try { py.kill('SIGKILL'); } catch (e) { /* gone */ } }, 500);
     }
-    if (s.out.console) consoleVideo.stop();
-    else {
+    if (s.out.console) {
+        consoleVideo.stop();
+        /* the touch screen again, if the app's screen state is still open */
+        if (!session || !session.out.console) touch.cover(null);
+    } else {
         if (s.pump) clearInterval(s.pump);
         if (s.reader) s.reader.close();
         try { fs.unlinkSync(s.small); } catch (e) { /* gone */ }
@@ -405,6 +422,9 @@ function startStream(h, app, launch, retried) {
     /* the frame file first: moonlight-core opens it as it starts */
     let small = null;
     const viaWinston = out.console && winstonOut && fs.existsSync(WINSTON_SOCKET);
+    /* the picture covers the app area: the touch screen goes first (one
+     * mgu-render client at a time), back when the stream ends (teardown) */
+    if (out.console) touch.cover('a stream on the centre console');
     /* through Winston: the frame file only (the way back); mgu-render once moonlight-core says it needs it */
     if (viaWinston) consoleOut.frameFile(consoleOut.FILE, w, hgt);
     else if (out.console) consoleVideo.start(w, hgt, fps);
@@ -614,7 +634,64 @@ function status() {
         hosts: hosts.map(hostView), pairing: pairing && pairing.state === 'waiting' || (pairing && Date.now() - pairing.started < 60000) ? pairing : null,
         settings: { mode: settings.mode, fps: settings.fps, bitrate: bitrate(), bitrateAuto: !settings.bitrate, audio: settings.audio, volume: settings.volume, sops: settings.sops },
         modes: MODES.map((m) => m.id), rates: RATES,
+        touch: touch.shown(), touchWanted: touch.isWanted(),
     };
+}
+
+/* ---- the touch screen ---------------------------------------------------------- */
+
+/* The uplink, the link and whether mgu-render is there: files, read every
+ * NET_MS, so the touch screen's model (a frame's) never reads one. */
+const NET_MS = 2000;
+const netNow = { uplink: 'unknown', link: null, console: false };
+function readNet() {
+    netNow.uplink = (readJson(UPLINK_STATUS) || {}).state || 'unknown';
+    netNow.link = link();
+    netNow.console = consoleOut.available();
+}
+
+/* What the touch screen shows (touch_view.js's model): from memory only. */
+function touchState() {
+    const s = session, cur = s || last;
+    const padNames = s ? Object.keys(s.pads).map((k) => s.pads[k]) : pads.map((p) => p.name);
+    return {
+        enabled: settings.enabled, link: netNow.link, uplink: netNow.uplink, state: state(),
+        host: cur.host ? { name: cur.host.name, address: cur.host.address } : null, app: cur.app ? { name: cur.app.name } : null,
+        fps: s ? s.fps : 0, size: s ? s.w + 'x' + s.h + '@' + s.fpsWanted : null, decoder: s ? s.decoder : null,
+        seconds: s ? Math.round((Date.now() - s.started) / 1000) : 0, via: s ? s.via : null,
+        pads: padNames.filter(Boolean), output: s ? s.output : settings.output,
+        outputs: Object.keys(OUTPUTS).map((k) => ({ id: k, title: OUTPUTS[k].title, ready: OUTPUTS[k].console ? netNow.console : cr.ready })),
+        canResume: !!settings.last && !s, last: settings.last ? { host: settings.last.host, app: settings.last.app } : null,
+        error: s ? s.error : last.error || null, note: s ? null : last.note || null,
+        moving: moving(), kmh: vehicle.kmh,
+        render: (netNow.console ? 'mgu-render' : 'no mgu-render') + ' · ' + (cr.ready ? 'cluster-render' : 'no cluster-render') + (winstonOut ? ' · Winston output on' : ''),
+    };
+}
+
+const touch = new Touch({
+    dir: HERE, log: log, clientPath: consoleOut.CLIENT,
+    touch: { python: PYTHON, iface: TOUCH_IFACE || 'vlan73', src: TOUCH_SRC, file: TOUCH_FILE, cmd: UI_TOUCH_CMD },
+    state: touchState,
+    /* the touch screen's buttons: as the iDrive list's */
+    act: (id, value) => {
+        if (id === 'stop') return command({ cmd: 'stop' });
+        if (id === 'quit') return command({ cmd: 'quit' });
+        if (id === 'resume') return command({ cmd: 'resume' });
+        if (id === 'out') return command({ cmd: 'output', output: value });
+        if (id === 'enabled') return command({ cmd: value ? 'enable' : 'disable' });
+        return null;
+    },
+});
+touch.on('change', () => { if (control) control.broadcast(); });
+/* the List corner: the app goes back to its iDrive list (the touch screen hid itself) */
+touch.on('list', () => { if (control) { control.send({ ev: 'list' }); control.broadcast(); } });
+
+/* the app's screen state opened or closed */
+function setTouch(on) {
+    if (on && moving()) return 'only while parked: the car is moving (' + mph(vehicle.kmh) + ')';
+    const err = touch.want(!!on);
+    if (on && !err && touch.covered()) log('touch: wanted; shown when the stream on the centre console ends');
+    return err;
 }
 
 /* ---- the web page ------------------------------------------------------------ */
@@ -722,6 +799,7 @@ function command(c) {
     if (c.cmd === 'speed') { setSpeed(c.kmh); return null; }
     if (c.cmd === 'enable') { setEnabled(true); return null; }
     if (c.cmd === 'disable') { setEnabled(false); return null; }
+    if (c.cmd === 'touch') return setTouch(c.on);
     if (!settings.enabled) return 'Moonlight is off';
     if (c.cmd === 'stop') { stopSession('stopped on the iDrive page'); return null; }
     if (c.cmd === 'winston') return setWinston(c.on);
@@ -748,6 +826,7 @@ function shutdown(sig) {
     if (stopping) return;
     stopping = true;
     log('stopping (' + sig + ')');
+    touch.drop('the tool stops');
     stopSession('shutting down');
     consoleVideo.stop();
     cr.close();
@@ -776,6 +855,8 @@ cr.connect();
 control = startControl({ app: 'vizualyse_moonlight', status: status, command: command, log: log });
 scanPads();
 setInterval(scanPads, 5000);
+readNet();
+setInterval(readNet, NET_MS);
 /* the PCs' state (online, paired, a game running), for the page */
 setInterval(() => { if (!session) hosts.forEach((h) => refreshHost(h)); }, 15000);
 hosts.forEach((h) => refreshHost(h));

@@ -8,7 +8,9 @@ const path = require('path');
 const T = process.argv[2];
 /* [id, type, widget, name, focusable, first text] */
 const C = [
-    [20, 'label', 'LT_Label_1Row', 'moonlightStatus', 0, 'Connecting…'],
+    [20, 'label', 'LT_Label_1Row', 'moonlightStatus', 0, 'Connecting...'],
+    /* the touch screen again (the app opens it by itself on entry) */
+    [24, 'button', 'LT_Button_1Row', 'moonlightTouch', 3, 'Touch screen'],
     [21, 'label', 'LT_Label_1Graphic_Scalable', 'moonlightQr', 0, null],
     [22, 'label', 'LT_Label_1Row', 'moonlightLink', 0, ''],
     [23, 'label', 'LT_Label_1Row', 'moonlightHint', 0, ''],
@@ -28,7 +30,18 @@ let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- SPDX-License-Identifier:
 C.forEach(([id, type, widget, , focus]) => {
     xml += `            <component id="${id}" type="${type}" widget="${widget}">\n                <property id="2" value="1"/>\n                <property id="3" value="${focus}"/>\n            </component>\n`;
 });
-xml += '        </layoutGroup>\n    </container>\n</application>\n';
+/* The screen state (2, ParentState 1): opened while the touch screen (the
+ * tool's) covers the app area: the app opens it on entry. Nothing focusable
+ * or touchable on it, because the HMI still gets every touch on the touch
+ * screen and would press whatever lies under it. BACK (the arrow outside
+ * the touch screen) returns to the main page. */
+xml += '        </layoutGroup>\n    </container>\n' +
+    '    <container id="2" type="state" widget="LT_State_Wide">\n        <property id="9" value="1"/>\n' +
+    '        <layoutGroup id="101" name="Titlebar">\n' +
+    '            <component id="50" type="title">\n                <property id="2" value="1"/>\n            </component>\n        </layoutGroup>\n' +
+    '        <layoutGroup id="201" name="List">\n            <property id="3" value="1"/>\n' +
+    '            <component id="51" type="label" widget="LT_Label_1Row">\n                <property id="2" value="1"/>\n                <property id="3" value="0"/>\n            </component>\n' +
+    '        </layoutGroup>\n    </container>\n</application>\n';
 fs.writeFileSync(path.join(dir, 'application.xml'), xml);
 const vis = { Visible: { value: 1, type: 'UInt' } };
 const comps = { 10: { type: 'title', name: 'moonlightTitle', properties: vis, rows: [{ Text: { value: 'SID_MOONLIGHT_TITLE', type: 'StringId' } }] } };
@@ -41,5 +54,12 @@ C.forEach(([id, type, , name, focus, text, items]) => {
         : { type: type, name: name, properties: properties, rows: [text === null ? {} : { Text: { value: text, type: 'Text' } }] };
 });
 fs.writeFileSync(path.join(dir, 'uiDescription.json'),
-    JSON.stringify({ schemaVersion: '1.3.0', containers: { 1: { type: 'state', name: 'ST_OnlineApps_VizualyseMoonlight', components: comps } } }, null, 2) + '\n');
+    JSON.stringify({ schemaVersion: '1.3.0', containers: {
+        1: { type: 'state', name: 'ST_OnlineApps_VizualyseMoonlight', components: comps },
+        2: { type: 'state', name: 'ST_OnlineApps_VizualyseMoonlightScreen', components: {
+            50: { type: 'title', name: 'moonlightScreenTitle', properties: vis, rows: [{ Text: { value: 'SID_MOONLIGHT_TITLE', type: 'StringId' } }] },
+            51: { type: 'label', name: 'moonlightScreenNote', properties: Object.assign({}, vis, { Focusable: { value: 0, type: 'UInt' } }),
+                rows: [{ Text: { value: 'The touch screen is up. List (top right) or Back shows the list.', type: 'Text' } }] },
+        } },
+    } }, null, 2) + '\n');
 console.log('page: ' + C.length + ' rows');

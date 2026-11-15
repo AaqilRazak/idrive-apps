@@ -10,9 +10,11 @@
  * the PC), {"cmd":"quit"} (stop and close the game), {"cmd":"resume"} (the
  * last host and game again), {"cmd":"output","output":"console"|"map"|"hud"}
  * (where the picture goes; a stream moves there), {"cmd":"speed","kmh":N}
- * (the car's speed, about once a second: answered with nothing); anything
- * else, or a command that can't run, is answered with
- * {"ev":"error","error":...}.
+ * (the car's speed, about once a second: answered with nothing),
+ * {"cmd":"touch","on":bool} (the touch screen: the app's screen state is
+ * open or closed); anything else, or a command that can't run, is answered
+ * with {"ev":"error","error":...}. The touch screen's List corner sends
+ * {"ev":"list"} (the app goes back to its list).
  */
 'use strict';
 
@@ -114,6 +116,8 @@ function startControl(opts) {
 
     return {
         broadcast: broadcast,
+        /* an event to every client (the touch screen's List corner: {"ev":"list"}) */
+        send: (obj) => clients.forEach((s) => send(s, obj)),
         close() {
             clearInterval(timer);
             clearInterval(recheck);

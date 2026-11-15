@@ -61,13 +61,51 @@ the car. The cluster and the HUD are unchanged.
 | `console_out.js` | root | makes mgu-render's frame file `/dev/shm/mgu-video-vizualyse_moonlight` and shows it over the whole screen, black bars at the sides; the stop hint as a picture over it for 10 s (`hint.rgba`, drawn at build time). For the cluster and the HUD, a small frame file in `/dev/shm/vizualyse-moonlight/` that `server.js` packs for cluster-render |
 | `pcm_play.py` | root, mgu-python | the audio into SmartXbar's `CarPlayMain_CF_48_STEREO` (heard only while CarPlay is the source: knowledge/sound.md). Makes the stream's lock as the system does (`ent_alsa:mgu_alsa` 0660) before opening: opened first by root it was root's, and CarPlay went silent until a restart (0.2.1) |
 | `firewall.js` | root | in-memory nftables rules: the page's TCP 8490 on `wlan0` while on; UDP from the PC being streamed (47998-48000) while streaming |
-| `control.js` | root | the iDrive app's socket, `/dev/shm/vizualyse-moonlight/ctl.sock`: status, enable, disable, stop, quit, resume, output, speed (above 3 km/h a stream stops and none starts) |
+| `control.js` | root | the iDrive app's socket, `/dev/shm/vizualyse-moonlight/ctl.sock`: status, enable, disable, stop, quit, resume, output, touch, speed (above 3 km/h a stream stops and none starts); `{"ev":"list"}` to the app from the touch screen's List button |
+| `touch.js`, `touch_view.js` | root (`touch_reader.py`: mgu-python) | the touch screen (below), in the platform's touch kit (`tool/touch_ui`: `ui_kit.js`, `ui_host.js`, `ui_canvas.js`, `touch_reader.py`, the fonts); the QR code from `qrcode.js` (`common/qrcode`) |
 
 State in `/var/opt/vizualyse-moonlight/state`: the page token, the settings,
 the client's identity (`identity/`: certificate, key, unique id; the key
 0600) and the paired PCs (`hosts.json`, with each PC's certificate).
 
+### The touch screen
+
+The iDrive app opens its empty screen state, then sends
+`{"cmd":"touch","on":true}`; BACK, HOME, another app or a pop-up make it
+send `on: false`. Refused while the car is known to move (above 3 km/h),
+and hidden when it starts to.
+
+- **What it shows** (`src/touch_view.js`, the kit's frame: tabs top left,
+  List top right, the status line with the speed in mph at the bottom):
+  **Stream**: the phone page's QR code and its address; the stream's card
+  (chips for its state and time, frame rate and GPU or software decoding;
+  the game; the PC, its address and the controllers) with **Stop** (the game
+  keeps running), **Quit game** (closes it on the PC) and **Resume last**,
+  enabled as the iDrive list's are; **Picture on** (a drop-down and its
+  sheet: Centre console, Cluster, HUD, one not connected marked so) and the
+  Moonlight switch. **Info**: host, game, pictures, controllers, the uplink
+  and the renderers. Every button does what the list's does (`command()`).
+- **Its model** (`touchState()` in `server.js`): from memory, once a frame.
+  The uplink's state, the link and whether mgu-render is there are files,
+  read every 2 s instead; the QR matrix is worked out once per link.
+- **A stream on the centre console** covers the app area (mgu-render's
+  client of the same name, or Winston): the touch screen hides as the
+  stream starts and comes back 300 ms after its picture goes (one
+  mgu-render client at a time), if the app's screen state is still open.
+  On the cluster or the HUD it stays.
+- **List** (top right): hides it and sends `{"ev":"list"}`; the app closes
+  its screen state and shows the list.
+
 ## Off the car
+
+`node test/touch_test.js [out-dir]` (Node 8 or newer, no Docker): the touch
+screen's look in every state (the kit's lint clean in both tabs and with the
+sheet open; PNGs to look at), the hiding for a console stream (`touch.js`
+against a stand-in mgu-render client), and `server.js` driven over the
+control socket with a stand-in reader's taps: shown in the app area, the
+tabs, the switch, Picture on's sheet, List, moving, hidden by the app. No
+stream is played there: the hiding around a real one is covered by the
+unit check only.
 
 `sh build.sh` builds `build/moonlight-core` in `image/Dockerfile` (Ubuntu
 18.04, gcc 8: the unit's glibc 2.27 and OpenSSL 1.1; libopus and FFmpeg's

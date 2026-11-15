@@ -195,4 +195,4 @@ class ConsoleVideo {
     }
 }
 
-module.exports = { ConsoleVideo, FrameReader, frameFile, available, FILE };
+module.exports = { ConsoleVideo, FrameReader, frameFile, available, FILE, CLIENT };

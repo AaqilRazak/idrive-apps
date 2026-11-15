@@ -5,7 +5,15 @@
  * which streams games from a PC running Sunshine to this screen. Pairing,
  * the host and the game are picked on the phone page the tool serves.
  *
- * One LT_State_Wide page: the status; the phone page's link as a QR code
+ * The touch screen first: entered, the app opens its empty screen state and
+ * the tool's touch screen goes over it (the QR code, the stream and its
+ * buttons, Picture on, on / off: the same as the list); its List corner,
+ * BACK or the car moving bring this page back (platform app/touch_mode). A
+ * stream on the centre console covers the touch screen while it plays (the
+ * tool hides it and shows it again after).
+ *
+ * One LT_State_Wide page: the status; Touch screen (the touch screen
+ * again); the phone page's link as a QR code
  * (LT_Label_1Graphic_Scalable, a PNG in /dev/shm the HMI can read) and as
  * text; Moonlight on or off; where the picture goes (a drop-down: centre
  * console, cluster, HUD; a stream moves there); Stop (the game keeps running
@@ -28,12 +36,14 @@ const logging = require('oap-sdk/src/logging/logging');
 const { MoonlightControl } = require('./moonlight_control.js');
 const { watchSpeed } = require('./vehicle_speed.js');
 const { qrPng } = require('./qr_png.js');
+const { TouchMode } = require('./touch_mode.js');
 
 const logger = logging.getSDKLogger();
 
 const STATE_NAME = 'ST_OnlineApps_VizualyseMoonlight';
+const SCREEN_NAME = 'ST_OnlineApps_VizualyseMoonlightScreen';
 const N = {
-    status: 'moonlightStatus', qr: 'moonlightQr', link: 'moonlightLink', hint: 'moonlightHint', info: 'moonlightInfo',
+    status: 'moonlightStatus', touch: 'moonlightTouch', qr: 'moonlightQr', link: 'moonlightLink', hint: 'moonlightHint', info: 'moonlightInfo',
     enable: 'moonlightEnable', stop: 'moonlightStop', quit: 'moonlightQuit', resume: 'moonlightResume', output: 'moonlightOutput',
 };
 /* the drop-down's rows (tools/make_page.js), as the tool names them */
@@ -50,9 +60,11 @@ function qrDir() {
     return '/dev/shm/vizualyse_moonlight_qr_' + uid;
 }
 
+/* one row of plain ASCII (the tool's texts carry names from the PC) */
 function oneRow(line) {
-    const flat = String(line || '').replace(/\s+/g, ' ');
-    return flat.length > ROW_CHARS ? flat.slice(0, ROW_CHARS - 1) + '…' : flat;
+    const flat = String(line || '').replace(/\s+/g, ' ').replace(/[·–—]/g, '-').replace(/[‘’]/g, "'")
+        .replace(/…/g, '...').replace(/[^\x20-\x7e]/g, '?');
+    return flat.length > ROW_CHARS ? flat.slice(0, ROW_CHARS - 3) + '...' : flat;
 }
 
 /* RHMI event values arrive as booleans, or as 1/0 on some HMIs. */
@@ -64,6 +76,8 @@ class MoonlightApp extends OnlineApp {
     constructor() {
         super();
         this._state = null;
+        this._screen = null;
+        this._touch = null;
         this._components = {};
         this._actionById = {};
         this._lastPress = {};
@@ -73,7 +87,8 @@ class MoonlightApp extends OnlineApp {
         this._shutdownPromise = null;
         this._qr = { key: null, file: null, chain: Promise.resolve() };
         this._control = new MoonlightControl({ log: logger });
-        this._control.on('change', () => this._render());
+        this._control.on('change', () => { if (this._touch) this._touch.sync(); this._render(); });
+        this._control.on('list', () => { if (this._touch) this._touch.list(); });
         this._stopSpeed = null;
 
         this.on('initialized', () => {
@@ -108,6 +123,7 @@ class MoonlightApp extends OnlineApp {
                 if (foregroundStart) {
                     this._sawForeground = true;
                     this._setVisible(true);
+                    this._touch.entered();
                 }
                 const lastUuid = this.getLastExecutedEntryPointUuid && this.getLastExecutedEntryPointUuid();
                 return lastUuid ? this._onEntryPointExecute(lastUuid) : undefined;
@@ -140,6 +156,13 @@ class MoonlightApp extends OnlineApp {
         const missing = names.filter((name) => !this._components[name]);
         if (missing.length) return Promise.reject(new Error('uiDescription lacks ' + missing.join(', ')));
 
+        this._screen = rhmi.getByName(SCREEN_NAME);
+        if (!this._screen) logger.warn('uiDescription has no ' + SCREEN_NAME + ': the touch screen goes over the page');
+        const c = this._control;
+        this._touch = new TouchMode({ rhmi: rhmi, page: this._state, screen: this._screen, log: logger,
+            tool: { connected: () => c.connected(), moving: () => c.moving(), shown: () => c.shown(), show: () => c.showTouch(), hide: () => c.hide() },
+            visible: (v) => this._setVisible(v) });
+        this._bind(N.touch, () => this._touch.open());
         this._bind(N.enable, () => (this._control.enabled() ? this._control.disable() : this._control.enable()));
         this._bind(N.stop, () => this._control.stop());
         this._bind(N.quit, () => this._control.quit());
@@ -172,11 +195,8 @@ class MoonlightApp extends OnlineApp {
             this._qr.key = null;
             this._render();
         });
-        this._state.on('visible', (event) => {
-            const visible = isTrue(event && event.visible);
-            if (visible) this._sawForeground = true;
-            this._setVisible(visible);
-        });
+        /* the app's visibility: either state's (TouchMode's visible()) */
+        this._state.on('visible', (event) => { if (isTrue(event && event.visible)) this._sawForeground = true; });
         return Promise.resolve(this._state.updateResources()).then(() => {
             logger.info('page ready: ' + names.length + ' components found');
             this._render();
@@ -224,6 +244,7 @@ class MoonlightApp extends OnlineApp {
         if (this._shutdownPromise || !this.rhmiApplication || !uuid) return Promise.resolve();
         this._sawForeground = true;
         this._setVisible(true);
+        if (this._touch) this._touch.entered();
         return Promise.resolve(this.rhmiApplication.openEntryState(uuid))
             .catch((err) => logger.warn('openEntryState failed: ' + (err && err.message)));
     }
@@ -286,13 +307,18 @@ class MoonlightApp extends OnlineApp {
 
     _render() {
         if (!this._state || this._shutdownPromise) return;
-        const c = this._control, up = c.connected(), on = up && c.enabled(), link = on ? c.link() : '';
+        const c = this._control, up = c.connected(), link = up && c.enabled() ? c.link() : '';
+        /* while the touch screen covers the page itself (no screen state), nothing under it can be pressed */
+        const covered = this._touch ? this._touch.covered() : false;
+        const on = up && c.enabled() && !covered;
         this._write(N.status, c.statusText());
+        this._write(N.touch, c.moving() ? 'Touch screen (only while parked)' : 'Touch screen');
+        this._setEnabled(N.touch, up && !c.moving() && !covered);
         this._write(N.link, link ? link : '');
         this._write(N.hint, link ? 'Scan with the phone whose hotspot the car is on to pair and pick the PC and game' : '');
         this._write(N.info, c.infoText());
         this._write(N.enable, 'Moonlight: ' + (up ? (c.enabled() ? 'on' : 'off') : 'not running'));
-        this._setEnabled(N.enable, up);
+        this._setEnabled(N.enable, up && !covered);
         this._setEnabled(N.stop, on && c.active());
         this._setEnabled(N.quit, on && c.active());
         this._setEnabled(N.resume, on && !c.active() && c.canResume());
@@ -348,6 +374,7 @@ class MoonlightApp extends OnlineApp {
         if (this._shutdownPromise) return this._shutdownPromise;
         logger.info('vizualyse_moonlight shutdown: ' + JSON.stringify(reason));
         if (this._stopSpeed) this._stopSpeed();
+        if (this._touch) this._touch.stop(); else this._control.hide();
         this._control.close();
         const bundle = this.rhmiApplication && this.rhmiApplication.getResourceBundle();
         this._shutdownPromise = Promise.resolve()
