@@ -13,10 +13,11 @@
  * Covers: application.xml and uiDescription.json agree, the app binds every
  * button, its UUIDs are its own; with no tool the status says so and the
  * buttons are off; connected, a row per family (titles ASCII, the one in
- * use marked); a row sends use; Choose opens the empty screen state and
- * the picker goes up once it is visible, every button off meanwhile; BACK
- * and a pop-up hide it; moving: Choose off and "only while parked" from the
- * tool; Sport or Comfort cycles; the strip; on / off; a failed command's
+ * use marked); entered, the touch screen opens by itself (the empty screen
+ * state, then the picker once it is visible); its List corner brings the
+ * page back; a row sends use; Touch screen opens it again; BACK and a
+ * pop-up hide it; the car moving brings the page back; moving: Touch screen
+ * off and "only while parked" from the tool; Sport or Comfort cycles; the strip; on / off; a failed command's
  * error; the speed; the tool going away.
  */
 const assert = require('assert');
@@ -84,6 +85,13 @@ const opened = [];
 rhmi.openState = (st) => {
     opened.push(st);
     setImmediate(() => { byName[STATE].emit('visible', { visible: false }); st.emit('visible', { visible: true }); });
+    return Promise.resolve();
+};
+/* closeState: the state goes, the main state comes */
+const closed = [];
+rhmi.closeState = (st) => {
+    closed.push(st);
+    setImmediate(() => { st.emit('visible', { visible: false }); byName[STATE].emit('visible', { visible: true }); });
     return Promise.resolve();
 };
 rhmi.getResourceBundle = () => ({});
@@ -200,6 +208,7 @@ function startFakeTool(opts) {
     server.listen(PIPE);
     return {
         broadcast() { clients.forEach((x) => send(x, status())); },
+        event(obj) { clients.forEach((x) => send(x, obj)); },
         clients() { return clients.size; },
         close() { clients.forEach((x) => x.destroy()); server.close(); },
     };
@@ -280,6 +289,8 @@ async function main() {
 
     process.exit = (code) => { throw new Error('process.exit(' + code + ')'); };
     runSource();
+    /* the HMI shows the entry state */
+    setTimeout(() => byName[STATE].emit('visible', { visible: true }), 50);
     const S = byName.clusterStatus;
     await until('no-tool status', () => /not running/.test(S.text || ''));
     assert(!logs.some((l) => /^error/.test(l)), logs.filter((l) => /^error/.test(l)).join('\n'));
@@ -289,13 +300,27 @@ async function main() {
     console.log('ok   without the tool: "' + S.text + '", buttons off, no theme rows');
 
     serve();
+    /* entered with the tool there: the touch screen by itself; its List corner: the page */
+    await until('the screen state opened by itself', () => opened.length === 1 && opened[0] === byName[SCREEN]);
+    await until('the picker shown', () => count('picker', (c) => c.on === true) === 1 && /^The touch screen is up/.test(S.text || ''));
+    st = Object.assign({}, st, { picker: false });
+    tool.event({ ev: 'list' });
+    tool.broadcast();
+    await until('the page back on List', () => closed.length === 1 && closed[0] === byName[SCREEN]);
+    await until('the page shows', () => S.text === "Off - the car's own cluster shows");
+    await sleep(600);
+    assert.strictEqual(opened.length, 1, 'the touch screen does not come back by itself after List');
+    console.log('ok   entered: the touch screen opens by itself; its List corner closes it to the page');
+
     await until('off status', () => S.text === "Off - the car's own cluster shows");
     assert.deepStrictEqual(THEME_ROWS.map((n) => byName[n].text), FAMS.map((f) => f[1]), 'a row per family, in order, no mode in the title');
     assert(THEME_ROWS.every((n) => byName[n].visible && byName[n].enabled), 'the rows shown and on');
-    assert(byName.clusterPick.enabled, 'Choose on (speed unknown: the tool decides)');
+    assert(byName.clusterPick.enabled, 'Touch screen on (speed unknown: the tool decides)');
+    assert.strictEqual(byName.clusterPick.text, 'Touch screen');
     assert.strictEqual(byName.clusterMode.text, 'Sport or Comfort: by the drive mode');
     assert.strictEqual(byName.clusterEnable.text, "Cluster themes: off (the car's own cluster)");
     console.log('ok   connected: "' + S.text + '"; 8 rows ("' + byName.clusterTheme1.text + '" ...)');
+
 
     /* a row: use (on with that family) */
     await press('clusterTheme4');
@@ -304,13 +329,12 @@ async function main() {
     assert.strictEqual(byName.clusterEnable.text, 'Cluster themes: on');
     console.log('ok   a theme row sends use: "' + S.text + '", "' + byName.clusterTheme4.text + '"');
 
-    /* Choose: the screen state, then the picker; every button off while it covers the page */
+    /* Touch screen: the screen state, then the picker */
     await press('clusterPick');
-    await until('the screen state opened', () => opened.length === 1 && opened[0] === byName[SCREEN]);
-    await until('picker on sent once it is visible', () => count('picker', (c) => c.on === true) === 1);
-    await until('the picker shown', () => /^The picker is on the screen/.test(S.text || ''));
-    await until('every button off while covered', () => BUTTONS.every((n) => byName[n].enabled === false));
-    console.log('ok   Choose opens the empty screen state, then the picker; buttons off while covered');
+    await until('the screen state opened', () => opened.length === 2 && opened[1] === byName[SCREEN]);
+    await until('picker on sent once it is visible', () => count('picker', (c) => c.on === true) === 2);
+    await until('the picker shown', () => /^The touch screen is up/.test(S.text || ''));
+    console.log('ok   Touch screen opens the empty screen state, then the picker');
 
     /* what the picker changed shows on the page */
     st = Object.assign({}, st, { theme: 'tri1', showing: 'tri1' });
@@ -323,9 +347,9 @@ async function main() {
     await until('picker off on BACK', () => count('picker', (c) => c.on === false) === 1, 1500);
     await until('the page back', () => S.text === 'On the cluster: Three-dial 1 (Sport)' && byName.clusterPick.enabled);
     await sleep(600);
-    assert.strictEqual(count('picker', (c) => c.on === true), 1, 'hidden by BACK, not shown again by itself');
+    assert.strictEqual(count('picker', (c) => c.on === true), 2, 'hidden by BACK, not shown again by itself');
     await press('clusterPick');
-    await until('the screen state again', () => opened.length === 2);
+    await until('the screen state again', () => opened.length === 3);
     await until('shown again', () => st.picker);
     byName[SCREEN].emit('focus', { focus: false });
     await until('picker off on a pop-up', () => count('picker', (c) => c.on === false) === 2, 2000);
@@ -333,7 +357,19 @@ async function main() {
     byName[SCREEN].emit('visible', { visible: false });
     byName[STATE].emit('visible', { visible: true });
     await until('the page back again', () => byName.clusterPick.enabled === true);
-    console.log('ok   BACK and a pop-up hide the picker; Choose shows it again');
+    console.log('ok   BACK and a pop-up hide the picker; Touch screen shows it again');
+
+    /* the car moving: the page back (the tool hides its picture itself) */
+    await press('clusterPick');
+    await until('the screen state for the move', () => opened.length === 4);
+    await until('shown for the move', () => st.picker);
+    st = Object.assign({}, st, { moving: true, speed: 30 });
+    tool.broadcast();
+    await until('the page back when the car moves', () => closed.length === 2);
+    await until('picker off when moving', () => count('picker', (c) => c.on === false) === 3, 2000);
+    st = Object.assign({}, st, { moving: null, speed: null });
+    tool.broadcast();
+    console.log('ok   the car moving closes the touch screen to the page');
 
     /* the speed; moving: Choose off; the tool refusing the picker */
     await sleep(1200);
@@ -342,7 +378,7 @@ async function main() {
     await until('speed 30 sent', () => received.some((c) => c.cmd === 'speed' && c.kmh === 30), 3000);
     st = Object.assign({}, st, { moving: true, speed: 30 });
     tool.broadcast();
-    await until('moving', () => byName.clusterPick.enabled === false && byName.clusterPick.text === 'Choose with previews (only while parked)');
+    await until('moving', () => byName.clusterPick.enabled === false && byName.clusterPick.text === 'Touch screen (only while parked)');
     assert(byName.clusterTheme1.enabled, 'the theme rows still work while driving');
     st = Object.assign({}, st, { moving: false, speed: 0 });
     speedRaw = 0;
@@ -353,7 +389,7 @@ async function main() {
     await until('the refusal', () => S.text === 'Error: only while parked');
     byName[SCREEN].emit('visible', { visible: false });
     byName[STATE].emit('visible', { visible: true });
-    console.log('ok   the speed goes to the tool; moving: Choose off, the rows still on; the tool\'s refusal shown');
+    console.log('ok   the speed goes to the tool; moving: Touch screen off, the rows still on; the tool\'s refusal shown');
 
     /* the readings: read, converted to the tool's names and units, sent as they change, all once a second */
     const lastSignals = () => {

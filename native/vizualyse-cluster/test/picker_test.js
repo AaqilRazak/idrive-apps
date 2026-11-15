@@ -2,9 +2,10 @@
 // Copyright (C) 2026 Yousaf Khan
 /**
  * The theme picker on the central screen, off the car:
- *   - its look (picker_view.js): every target 50 px or more and inside the
- *     app area, none overlapping; eight families with both modes; every
- *     family drawn in both looks; only changed regions sent again;
+ *   - its look (picker_view.js in the touch kit): every target 64 px or
+ *     more, inside the app area, none overlapping (the kit's lint), in both
+ *     tabs; eight families with both modes, every one drawn in both looks;
+ *     a press redraws its button alone;
  *   - the tool end to end: its kit assembled from component.json in a temp
  *     folder, server.js against a fake cluster-render and a fake mgu-render
  *     client (test/fake_render_client.js), touches from a stand-in reader
@@ -27,9 +28,9 @@ const { spawn, execFileSync } = require('child_process');
 const HERE = path.resolve(__dirname, '..');
 const ROOT = path.resolve(HERE, '..', '..');
 const view = require('../src/picker_view.js');
-const { Canvas } = require('../src/ui_draw.js');
-const { writePng } = require('../src/png.js');
-const { loadAssets, families, dirty } = require('../src/picker.js');
+const kitUi = require('../src/ui_kit.js');
+const { writePng } = require('../src/ui_png.js');
+const { loadAssets, families } = require('../src/picker.js');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vzp-'));
 const win = process.platform === 'win32';
@@ -51,36 +52,34 @@ const themes = fs.readdirSync(kit).filter((n) => /\.theme\.json$/.test(n)).map((
 const fams = families(themes);
 assert.strictEqual(fams.length, 8, 'eight families');
 fams.forEach((f) => assert.ok(f.sport && f.comfort, f.family + ' has a Sport and a Comfort theme'));
-const base = { families: fams, sel: 0, look: 'sport', enabled: true, inUse: fams[0].family, mode: 'auto', trying: null, canTry: true, line: 'x', pressed: null };
-const targets = view.layout(base);
-targets.forEach((r) => {
-    assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= view.AREA.w && r.y + r.h <= view.AREA.h, r.id + ' inside the app area');
-    if (r.id !== 'hero') assert.ok(r.w >= 50 && r.h >= 50, r.id + ' is at least 50 px (' + r.w + 'x' + r.h + ')');
-});
-targets.filter((r) => r.id !== 'hero').forEach((a, i, all) => all.slice(i + 1).forEach((b) => {
-    assert.ok(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y, a.id + ' and ' + b.id + ' overlap');
-}));
-const centre = (id, m) => { const r = view.layout(m || base).filter((t) => t.id === id)[0]; return [r.x + r.w / 2, r.y + r.h / 2]; };
-targets.forEach((r) => assert.strictEqual(view.hit(base, r.x + r.w / 2, r.y + r.h / 2), r.id, 'a touch at the middle of ' + r.id + ' hits it'));
+const F = kitUi.loadFonts(kit);
 const assets = loadAssets(kit);
-const cv = new Canvas(view.AREA.w, view.AREA.h);
+const chipW = (t) => kitUi.chipW(F, t);
+const base = { families: fams, sel: 0, look: 'sport', enabled: true, inUse: fams[0].family, mode: 'auto', cover: false, trying: null, canTry: true,
+    line: 'On the cluster: G20 inspired 1, Sport or Comfort by the drive mode', right: 'Parked', info: [['Showing', 'G20 inspired 1 · Sport'], ['Readings', '23 from the car']] };
+/* the widgets of a tab for a model, at app-area x, y */
+function widgets(m, tab) { return kitUi.frame(F, Object.assign(view.view(m || base, { tab: tab || 'themes' }, assets, chipW), { tab: tab || 'themes' }), { open: null }); }
+function centre(id, tab, m, dx) { const r = widgets(m, tab).filter((t) => t.id === id)[0]; if (!r) throw new Error('no ' + id); return [r.x + (dx === undefined ? r.w / 2 : dx), r.y + r.h / 2]; }
+['themes', 'settings'].forEach((tab) => {
+    const problems = kitUi.lint(widgets(base, tab));
+    assert.deepStrictEqual(problems, [], tab + ': ' + problems.join('; '));
+});
+const sf = new kitUi.Surface(F);
 let slowest = 0;
-fams.forEach((f, i) => ['sport', 'comfort'].forEach((look) => {
-    assert.ok(assets.hero(f[look]) && assets.thumb(f[look]), f[look] + ' has a preview and a tile');
+fams.forEach((f, i) => ['sport', 'comfort'].forEach((lk) => {
+    assert.ok(assets.hero(f[lk]) && assets.thumb(f[lk]), f[lk] + ' has a preview and a tile');
+    assert.strictEqual(assets.hero(f[lk]).w, view.HERO.w, f[lk] + ': the preview is built at the size drawn (picker_build.js)');
+    assert.strictEqual(assets.thumb(f[lk]).w, view.THUMB.w, f[lk] + ': the tile too');
     const t0 = Date.now();
-    view.render(cv, Object.assign({}, base, { sel: i, look: look }), assets);
+    sf.render(widgets(Object.assign({}, base, { sel: i, look: lk })), null);
     slowest = Math.max(slowest, Date.now() - t0);
 }));
-const a1 = Buffer.from(cv.px);
-assert.deepStrictEqual(dirty(a1, cv.px, cv.w, cv.h), [], 'nothing changed, nothing sent');
-view.render(cv, Object.assign({}, base, { sel: 7, look: 'comfort', pressed: 'try' }), assets);
-const a2 = Buffer.from(cv.px);
-view.render(cv, Object.assign({}, base, { sel: 7, look: 'comfort', pressed: null }), assets);
-const d = dirty(a2, cv.px, cv.w, cv.h), area = d.reduce((s, r) => s + r.w * r.h, 0);
-const tryBox = view.layout(base).filter((t) => t.id === 'try')[0];
-assert.ok(d.length && area < cv.w * cv.h / 10, 'a press redraws a small part (' + area + ' px)');
-d.forEach((r) => assert.ok(r.y + r.h > tryBox.y && r.y < tryBox.y + tryBox.h, 'only the pressed button\'s rows'));
-console.log('ok   the look: ' + targets.length + ' targets of 50 px or more, 8 families in both looks (slowest picture ' + slowest + ' ms), a press redraws ' + area + ' px');
+const W = widgets(Object.assign({}, base, { sel: 7, look: 'comfort' }));
+sf.render(W, null);
+const pressed = sf.render(W, { id: 'try', part: 0 });
+const tryBox = W.filter((t) => t.id === 'try')[0];
+assert.deepStrictEqual(pressed, [{ x: tryBox.x, y: tryBox.y, w: tryBox.w, h: tryBox.h }], 'a press redraws its button alone');
+console.log('ok   the look: both tabs lint clean, 8 families in both looks (slowest redraw ' + slowest + ' ms), a press redraws ' + tryBox.w * tryBox.h + ' px');
 
 /* ---- the tool end to end ---- */
 const render = net.createServer((s) => {
@@ -128,7 +127,7 @@ async function touch(lines) {
 }
 const tap = (p) => touch([[1, p[0], p[1]], 'wait 60', [2, p[0] + 2, p[1] + 1], 'wait 60', [3, p[0] + 2, p[1] + 1]]);
 
-let tool, ctl, statusNow = null, errors = [], out = '';
+let tool, ctl, statusNow = null, errors = [], out = '', lists = 0;
 function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
 
 (async () => {
@@ -149,7 +148,7 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
         let i;
         while ((i = lb.indexOf('\n')) >= 0) {
             const m = JSON.parse(lb.slice(0, i)); lb = lb.slice(i + 1);
-            if (m.ev === 'status') statusNow = m; else if (m.ev === 'error') errors.push(m.error);
+            if (m.ev === 'status') statusNow = m; else if (m.ev === 'error') errors.push(m.error); else if (m.ev === 'list') lists++;
         }
     });
     await until(() => statusNow, 5000, 'first status');
@@ -196,7 +195,7 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     console.log('ok   Try: refused until the car is known to stand still, then ' + made.length + ' layers and assets for 1.5 s, all gone after');
 
     /* Sport, then Use: on with that family */
-    await tap(centre('look:sport'));
+    await tap(centre('look', 'themes', null, 40));
     await tap(centre('use'));
     await until(() => statusNow.enabled, 3000, 'Use turns themes on');
     assert.strictEqual(statusNow.theme, fams[3].family, 'with the family shown');
@@ -204,21 +203,24 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     console.log('ok   Use: themes on with ' + statusNow.theme + ' (' + statusNow.showing + ')');
 
     /* a swipe to the left on the large preview: the next family */
-    const h = view.HERO;
-    await touch([[1, h.x + 700, h.y + 200], 'wait 40', [2, h.x + 600, h.y + 205], 'wait 40', [2, h.x + 450, h.y + 210], 'wait 40', [3, h.x + 400, h.y + 210]]);
+    const h = widgets(base).filter((t) => t.id === 'hero')[0];
+    const swipe = () => touch([[1, h.x + 700, h.y + 200], 'wait 40', [2, h.x + 600, h.y + 205], 'wait 40', [2, h.x + 450, h.y + 210], 'wait 40', [3, h.x + 400, h.y + 210]]);
+    await swipe();
     await tap(centre('use'));
     await until(() => statusNow.theme === fams[4].family, 3000, 'the swipe went to the next family');
-    /* the > button: the one after */
-    await tap(centre('next'));
+    /* and another: the one after */
+    await swipe();
     await tap(centre('use'));
     await until(() => statusNow.theme === fams[5].family, 3000, 'next went to the one after');
     await wait(300);
     const starts = out.split('\n').filter((l) => / theme: .*\(\d+ layers/.test(l) && l.indexOf(themes.filter((t) => t.id === statusNow.showing)[0].title) >= 0);
     assert.strictEqual(starts.length, 1, 'Use starts the theme once:\n' + starts.join('\n'));
-    console.log('ok   a swipe and the > button go to the next family; Use starts its theme once');
+    console.log('ok   a swipe goes to the next family; Use starts its theme once');
 
-    /* Sport always */
-    await tap(centre('mode:sport'));
+    /* the Settings tab: Sport always */
+    await tap(centre('_tabs', 'themes', null, 300));
+    await wait(200);
+    await tap(centre('mode', 'settings', null, 1098 / 2));
     await until(() => statusNow.mode === 'sport', 3000, 'mode Sport');
     await until(() => statusNow.showing === fams[5].sport, 5000, 'its Sport theme on the cluster');
     console.log('ok   Sport always: ' + statusNow.showing);
@@ -243,11 +245,21 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     send({ cmd: 'picker', on: true });
     await until(() => statusNow.picker === true, 3000, 'shown again');
     await wait(300);
-    await tap(centre('off', Object.assign({}, base, { enabled: true })));
+    /* the tab is kept while the tool runs: Settings */
+    await tap(centre('cover', 'settings'));
+    await until(() => statusNow.cover === true, 3000, 'the strip covered');
+    await tap(centre('enabled', 'settings'));
     await until(() => statusNow.enabled === false, 3000, 'Off');
+    /* the List corner: the app is told to go back to its list, the picker hides */
+    lists = 0;
+    await tap(centre('_list'));
+    await until(() => lists === 1 && statusNow.picker === false, 3000, 'List');
+    console.log('ok   the List corner: {"ev":"list"} to the app, the picker hidden');
+    send({ cmd: 'picker', on: true });
+    await until(() => statusNow.picker === true, 3000, 'shown again');
     send({ cmd: 'picker', on: false });
     await until(() => statusNow.picker === false, 3000, 'hidden by the app');
-    console.log('ok   Off from the picker; hidden by the app');
+    console.log('ok   cover and Off from the Settings tab; hidden by the app');
     console.log('     the last picture: ' + OUT);
     if (process.env.PICKER_TEST_LOG) console.log(out);
     finish(0);

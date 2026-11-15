@@ -1,7 +1,7 @@
 {
   "build": "node tools/build.js",
   "requires": {
-    "vizualyse-cluster": "0.2.0"
+    "vizualyse-cluster": "0.4.0"
   },
   "uninstallable": true,
   "mguHmi": [
@@ -12,6 +12,12 @@
       "version": "1.0.0",
       "files": {
         "src/vehicle_speed.js": "vehicle_speed.js"
+      }
+    },
+    "app/touch_mode": {
+      "version": "1.0.0",
+      "files": {
+        "src/touch_mode.js": "touch_mode.js"
       }
     }
   }

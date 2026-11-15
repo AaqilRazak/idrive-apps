@@ -4,21 +4,23 @@
  * vizualyse_cluster - the iDrive page of the vizualyse-cluster tool:
  * whole-cluster themes drawn over the instrument cluster.
  *
+ * The touch screen first: entered, the app opens its empty screen state and
+ * the tool's touch screen (the theme picker) goes over it; its List corner,
+ * BACK or the car moving bring this page back (platform app/touch_mode).
+ *
  * One LT_State_Wide page, all of it usable with the iDrive controller: the
- * status; Choose with previews (the touch picker); one row per theme family
+ * status; Touch screen (the picker again); one row per theme family
  * (pressing one puts it on the cluster and turns themes on); Sport or
  * Comfort (by the drive mode, always Sport, always Comfort); the car's strip
  * under the theme (shown or covered); themes on or off.
  *
  * The picker is the tool's: a preview of every theme drawn in the app area
  * (not the HMI's top bar or left strip), read by touch. The HMI still gets
- * every touch on it, so Choose first opens the screen state
- * (ST_..._VizualyseClusterScreen: a title and a label, nothing to press) and
- * the picker goes up once that state is visible; while it is up, every
- * button of the main page is disabled too (should the screen state not
- * open). It shows only while the state under it is visible and focused:
- * BACK (the arrow outside the picker), HOME, another app, or an HMI pop-up
- * taking the focus (a call, a warning) hides it.
+ * every touch on it, so it goes over the screen state
+ * (ST_..._VizualyseClusterScreen: a title and a label, nothing to press);
+ * should that state not open, over the page, every button disabled. It
+ * shows only while the state under it is visible and focused: BACK, HOME,
+ * another app, or an HMI pop-up taking the focus (a call, a warning) hide it.
  *
  * Only while parked: the app reads the car's speed once a second
  * (vehicle_speed.js) and hands it to the tool, which hides the picker above
@@ -38,14 +40,13 @@ const OnlineApp = require('oap-sdk/src/core/OnlineApp.js');
 const logging = require('oap-sdk/src/logging/logging');
 const { ClusterControl } = require('./cluster_control.js');
 const { watchSpeed } = require('./vehicle_speed.js');
+const { TouchMode } = require('./touch_mode.js');
 const vehicleSignals = require('./vehicle_signals.js');
 
 const logger = logging.getSDKLogger();
 
 const STATE_NAME = 'ST_OnlineApps_VizualyseCluster';
 const SCREEN_NAME = 'ST_OnlineApps_VizualyseClusterScreen';
-/* how long the screen state may take to show after openState */
-const SCREEN_OPEN_MS = 3000;
 const N = {
     status: 'clusterStatus', pick: 'clusterPick',
     theme1: 'clusterTheme1', theme2: 'clusterTheme2', theme3: 'clusterTheme3', theme4: 'clusterTheme4',
@@ -53,10 +54,6 @@ const N = {
     mode: 'clusterMode', cover: 'clusterCover', enable: 'clusterEnable',
 };
 const THEMES = [N.theme1, N.theme2, N.theme3, N.theme4, N.theme5, N.theme6, N.theme7, N.theme8];
-/* an HMI pop-up takes the focus while the page stays visible; leaving or
- * switching states takes it too, just before 'visible' goes: wait this long
- * to tell them apart */
-const FOCUS_LOST_MS = 300;
 const PRESS_DEDUPE_MS = 400;
 const ROW_CHARS = 90;
 
@@ -75,10 +72,7 @@ class ClusterApp extends OnlineApp {
         super();
         this._state = null;
         this._screen = null;
-        /* per state: visible, focused (assumed with visible until told otherwise) */
-        this._st = { main: { visible: false, focused: false }, screen: { visible: false, focused: false } };
-        this._wantScreen = false;
-        this._shownOn = 'screen';
+        this._touch = null;
         this._themeIds = THEMES.map(() => null);
         this._components = {};
         this._actionById = {};
@@ -88,7 +82,8 @@ class ClusterApp extends OnlineApp {
         this._sawForeground = false;
         this._shutdownPromise = null;
         this._control = new ClusterControl({ log: logger });
-        this._control.on('change', () => this._render());
+        this._control.on('change', () => { if (this._touch) this._touch.sync(); this._render(); });
+        this._control.on('list', () => { if (this._touch) this._touch.list(); });
         this._stopSpeed = null;
         this._stopSignals = null;
 
@@ -124,6 +119,7 @@ class ClusterApp extends OnlineApp {
                 if (foregroundStart) {
                     this._sawForeground = true;
                     this._setVisible(true);
+                    this._touch.entered();
                 }
                 const lastUuid = this.getLastExecutedEntryPointUuid && this.getLastExecutedEntryPointUuid();
                 return lastUuid ? this._onEntryPointExecute(lastUuid) : undefined;
@@ -159,7 +155,11 @@ class ClusterApp extends OnlineApp {
 
         this._screen = rhmi.getByName(SCREEN_NAME);
         if (!this._screen) logger.warn('uiDescription has no ' + SCREEN_NAME + ': the picker goes over the main page');
-        this._bind(N.pick, () => this._showPicker());
+        const c = this._control;
+        this._touch = new TouchMode({ rhmi: rhmi, page: this._state, screen: this._screen, log: logger,
+            tool: { connected: () => c.connected(), moving: () => c.moving(), shown: () => c.shown(), show: () => c.showPicker(), hide: () => c.hide() },
+            visible: (v) => this._setVisible(v) });
+        this._bind(N.pick, () => this._touch.open());
         THEMES.forEach((name, i) => this._bind(name, () => (this._themeIds[i] ? this._control.use(this._themeIds[i]) : true)));
         this._bind(N.mode, () => this._control.nextMode());
         this._bind(N.cover, () => this._control.cover(!this._control.covered()));
@@ -183,80 +183,11 @@ class ClusterApp extends OnlineApp {
             this._written = {};
             this._render();
         });
-        this._watchState(this._state, 'main');
-        if (this._screen) this._watchState(this._screen, 'screen');
+        this._state.on('visible', (event) => { if (isTrue(event && event.visible)) this._sawForeground = true; });
         return Promise.resolve(this._state.updateResources()).then(() => {
             logger.info('page ready: ' + names.length + ' components found');
             this._render();
         });
-    }
-
-    /* visible / focus of one of the two states */
-    _watchState(state, key) {
-        state.on('visible', (event) => {
-            const visible = isTrue(event && event.visible);
-            this._st[key].visible = visible;
-            this._st[key].focused = visible;
-            if (visible) this._sawForeground = true;
-            logger.info(key + ' state ' + (visible ? 'visible' : 'hidden'));
-            if (key === 'screen' && visible && this._wantScreen) {
-                this._wantScreen = false;
-                clearTimeout(this._screenTimer);
-                this._showOn('screen');
-            }
-            this._recheck();
-        });
-        state.on('focus', (event) => {
-            this._st[key].focused = isTrue(event && event.focus);
-            this._recheck();
-        });
-    }
-
-    /* After a short wait (the HMI moves visibility and focus one event at a
-     * time): the app is visible while either state is, and the picker stays
-     * up only while the state it was shown on is visible and focused (BACK
-     * from the screen state brings the main page back: that hides it too). */
-    _recheck() {
-        clearTimeout(this._focusTimer);
-        this._focusTimer = setTimeout(() => {
-            const m = this._st.main, sc = this._st.screen;
-            this._setVisible(m.visible || sc.visible);
-            const on = this._st[this._shownOn];
-            if (!(on.visible && on.focused) && !this._wantScreen && this._control.hide()) logger.info('our page left or covered (a pop-up?): picker hidden');
-        }, FOCUS_LOST_MS);
-    }
-
-    /* Choose: the screen state first, the picker once it is visible; without
-     * it (no such state, or the HMI won't open it) the picker goes over the
-     * main page, whose buttons are disabled meanwhile (_render). */
-    _showPicker() {
-        const rhmi = this.rhmiApplication, screen = this._screen;
-        if (!screen) return this._showOn('main');
-        if (this._st.screen.visible) return this._showOn('screen');
-        if (!this._control.connected()) return false;
-        if (this._control.moving()) return this._control.showPicker();   /* the tool says why */
-        this._wantScreen = true;
-        const fallback = (why) => {
-            if (!this._wantScreen) return;
-            this._wantScreen = false;
-            logger.warn('screen state: ' + why + '; the picker goes over the main page');
-            this._showOn('main');
-        };
-        clearTimeout(this._screenTimer);
-        this._screenTimer = setTimeout(() => fallback('not visible ' + SCREEN_OPEN_MS + ' ms after openState'), SCREEN_OPEN_MS);
-        if (typeof rhmi.openState !== 'function') { fallback('this SDK has no openState'); return true; }
-        const open = (arg) => Promise.resolve().then(() => rhmi.openState(arg));
-        open(screen).catch((err) => {
-            logger.info('openState(state) failed (' + (err && err.message) + '), trying its id');
-            return open(screen.getId());
-        }).catch((err) => fallback('openState failed: ' + (err && err.message)));
-        return true;
-    }
-
-    /* the picker up over one of our states ('main' or 'screen') */
-    _showOn(key) {
-        this._shownOn = key;
-        return this._control.showPicker();
     }
 
     _bind(name, handler) {
@@ -300,6 +231,7 @@ class ClusterApp extends OnlineApp {
         if (this._shutdownPromise || !this.rhmiApplication || !uuid) return Promise.resolve();
         this._sawForeground = true;
         this._setVisible(true);
+        if (this._touch) this._touch.entered();
         return Promise.resolve(this.rhmiApplication.openEntryState(uuid))
             .catch((err) => logger.warn('openEntryState failed: ' + (err && err.message)));
     }
@@ -355,9 +287,9 @@ class ClusterApp extends OnlineApp {
         if (!this._state || this._shutdownPromise) return;
         const c = this._control, up = c.connected(), on = c.enabled();
         /* while the picker covers the page, nothing under it can be pressed */
-        const covered = c.shown();
+        const covered = this._touch ? this._touch.covered() : c.shown();
         this._write(N.status, c.statusText());
-        this._write(N.pick, c.moving() ? 'Choose with previews (only while parked)' : 'Choose with previews (touch the screen)');
+        this._write(N.pick, c.moving() ? 'Touch screen (only while parked)' : 'Touch screen');
         this._write(N.mode, up ? c.modeText() : 'Sport or Comfort');
         this._write(N.cover, "The car's strip under the theme: " + (c.covered() ? 'covered (black)' : 'shown'));
         this._write(N.enable, 'Cluster themes: ' + (up ? (on ? 'on' : "off (the car's own cluster)") : 'not running'));
@@ -382,9 +314,7 @@ class ClusterApp extends OnlineApp {
         logger.info('vizualyse_cluster shutdown: ' + JSON.stringify(reason));
         if (this._stopSpeed) this._stopSpeed();
         if (this._stopSignals) this._stopSignals();
-        clearTimeout(this._focusTimer);
-        clearTimeout(this._screenTimer);
-        this._control.hide();
+        if (this._touch) this._touch.stop(); else this._control.hide();
         this._control.close();
         this._shutdownPromise = Promise.resolve()
             .then(() => this.destroyBundles().catch((err) => logger.info('destroyBundles: ' + (err && err.message))))

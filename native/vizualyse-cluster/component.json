@@ -1,7 +1,7 @@
 {
   "id": "vizualyse-cluster",
   "kind": "tool",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "license": "GPL-3.0-or-later",
   "title": "Cluster themes",
   "description": "EXPERIMENTAL, NOT YET TRIED ON A CAR. Whole-cluster themes drawn over the instrument cluster through cluster-render's panel target, under the car's own warning lights: eight families (G20 inspired 1 and 2, LCI inspired 1 and 2, Three-dial 1 and 2, Performance 1 and 2), each a Sport and a Comfort theme switched by the drive mode. Drawn by small shaders on the cluster with textures sent once (about 1.7-3.1 MB at start), so only a few KB/s of numbers cross the link while driving. Readings the car does not give show as --. Chosen on the central screen by touch, with a preview of each theme and a 10 s try on the cluster while parked (the Cluster themes iDrive app). About 12 MB.",
@@ -20,6 +20,21 @@
       "version": "1.0.0",
       "files": {
         "src/cluster_render_client.js": "cluster_render_client.js"
+      }
+    },
+    "tool/touch_ui": {
+      "version": "1.0.0",
+      "files": {
+        "src/ui_canvas.js": "ui_canvas.js",
+        "src/ui_kit.js": "ui_kit.js",
+        "src/ui_host.js": "ui_host.js",
+        "src/ui_png.js": "ui_png.js",
+        "src/touch_reader.py": "touch_reader.py",
+        "src/ui.fonts.json": "ui.fonts.json",
+        "src/ui.f20.font.gz": "ui.f20.font.gz",
+        "src/ui.f24.font.gz": "ui.f24.font.gz",
+        "src/ui.f32.font.gz": "ui.f32.font.gz",
+        "src/ui.f44.font.gz": "ui.f44.font.gz"
       }
     }
   },
@@ -60,18 +75,53 @@
       "mode": "0644"
     },
     {
-      "path": "ui_draw.js",
-      "from": "src/ui_draw.js",
-      "mode": "0644"
-    },
-    {
-      "path": "png.js",
-      "from": "src/png.js",
-      "mode": "0644"
-    },
-    {
       "path": "touch_reader.py",
       "from": "src/touch_reader.py",
+      "mode": "0644"
+    },
+    {
+      "path": "ui_canvas.js",
+      "from": "src/ui_canvas.js",
+      "mode": "0644"
+    },
+    {
+      "path": "ui_kit.js",
+      "from": "src/ui_kit.js",
+      "mode": "0644"
+    },
+    {
+      "path": "ui_host.js",
+      "from": "src/ui_host.js",
+      "mode": "0644"
+    },
+    {
+      "path": "ui_png.js",
+      "from": "src/ui_png.js",
+      "mode": "0644"
+    },
+    {
+      "path": "ui.fonts.json",
+      "from": "src/ui.fonts.json",
+      "mode": "0644"
+    },
+    {
+      "path": "ui.f20.font.gz",
+      "from": "src/ui.f20.font.gz",
+      "mode": "0644"
+    },
+    {
+      "path": "ui.f24.font.gz",
+      "from": "src/ui.f24.font.gz",
+      "mode": "0644"
+    },
+    {
+      "path": "ui.f32.font.gz",
+      "from": "src/ui.f32.font.gz",
+      "mode": "0644"
+    },
+    {
+      "path": "ui.f44.font.gz",
+      "from": "src/ui.f44.font.gz",
       "mode": "0644"
     },
     {
@@ -1077,26 +1127,6 @@
     {
       "path": "tri2c.theme.json",
       "from": "themes/built/tri2c.theme.json",
-      "mode": "0644"
-    },
-    {
-      "path": "picker.f20.font.gz",
-      "from": "picker/f20.font.gz",
-      "mode": "0644"
-    },
-    {
-      "path": "picker.f24.font.gz",
-      "from": "picker/f24.font.gz",
-      "mode": "0644"
-    },
-    {
-      "path": "picker.f36.font.gz",
-      "from": "picker/f36.font.gz",
-      "mode": "0644"
-    },
-    {
-      "path": "picker.fonts.json",
-      "from": "picker/fonts.json",
       "mode": "0644"
     },
     {

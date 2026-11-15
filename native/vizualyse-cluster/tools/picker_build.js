@@ -7,11 +7,12 @@
  *                          (tools/preview_shot.js at PREVIEW_T s), cut to the
  *                          picker's preview size (src/picker_view.js HERO), RGB
  *   picker/<id>.thumb.png  the same as a tile (THUMB: its middle, a cover crop)
- *   picker/fonts.json      the picker's fonts: glyphs, advances, atlas sizes
- *   picker/f<size>.font.gz each font's glyph atlas, R8 (headless Chrome)
- * and lists them in component.json's files.
+ * and lists them in component.json's files. The fonts are the touch kit's
+ * (platform/tool/touch_ui, tools/ui_fonts.js).
  *
- *   node tools/picker_build.js [--chrome PATH] [--only <id>,...] [--fonts]
+ *   node tools/picker_build.js [--chrome PATH] [--only <id>,...]
+ *   node tools/picker_build.js --resize   (from the previews already in
+ *       picker/, at the sizes picker_view.js draws now: no Chrome)
  *
  * Needs Chrome or Edge, as the theme build does.
  */
@@ -22,16 +23,14 @@ const path = require('path');
 const zlib = require('zlib');
 const { spawnSync } = require('child_process');
 const { readPng } = require('../src/png.js');
-const { resize, crop } = require('../src/ui_draw.js');
-const { HERO, THUMB, FONTS } = require('../src/picker_view.js');
-const { fontAtlas } = require('./theme_build.js');
+const { resize, crop } = require('../src/ui_canvas.js');
+const { HERO, THUMB } = require('../src/picker_view.js');
 
 const HERE = path.join(__dirname, '..');
 const OUT = path.join(HERE, 'picker');
 const BUILT = path.join(HERE, 'themes', 'built');
 /* the moment of the bench drive each preview shows: up to speed, every gauge lit */
 const PREVIEW_T = 9.5;
-const GLYPHS = Array.from({ length: 95 }, (x, i) => String.fromCharCode(32 + i)).join('') + '·';
 
 function arg(name) { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; }
 
@@ -92,29 +91,22 @@ function previews(ids, tmp) {
         if (r.status !== 0 || !fs.existsSync(shot)) throw new Error('preview of ' + id + ' failed: ' + (r.stderr || r.stdout || '').slice(-400));
         const img = readPng(fs.readFileSync(shot));
         if (img.w !== 1920 || img.h !== 720) throw new Error('preview of ' + id + ' is ' + img.w + 'x' + img.h);
-        const png = pngRgb(resize(img, HERO.w, HERO.h));
-        fs.writeFileSync(path.join(OUT, id + '.png'), png);
-        /* the tile: as tall as the tile, its middle (a cover crop) */
-        const tw = Math.round(1920 * THUMB.h / 720), small = resize(img, tw, THUMB.h);
-        const thumb = pngRgb(crop(small, Math.floor((tw - THUMB.w) / 2), 0, THUMB.w, THUMB.h));
-        fs.writeFileSync(path.join(OUT, id + '.thumb.png'), thumb);
-        console.log(id + '.png ' + (png.length / 1024).toFixed(0) + ' KB, thumb ' + (thumb.length / 1024).toFixed(0) + ' KB');
+        cut(id, img);
     });
 }
 
-function fonts(tmp) {
-    const meta = {};
-    Object.keys(FONTS).forEach((name) => {
-        const f = FONTS[name];
-        const cell = Math.ceil(f.size * 1.05), lineH = Math.ceil(f.size * 1.3);
-        const a = fontAtlas(path.join(HERE, 'themes', 'fonts'), { file: 'BarlowSemiCondensed-' + f.weight + '.woff2', glyphs: GLYPHS,
-            cell: [cell, lineH], size: f.size, weight: f.weight, proportional: true }, tmp);
-        const file = name + '.font.gz';
-        fs.writeFileSync(path.join(OUT, file), zlib.gzipSync(a.r8, { level: 9, mtime: 0 }));
-        meta[name] = { file: 'picker.' + file, size: f.size, weight: f.weight, glyphs: GLYPHS, cell: cell, lineH: lineH, w: a.w, h: a.h, top: a.top, adv: a.adv };
-        console.log(file + ' ' + a.w + 'x' + a.h);
-    });
-    fs.writeFileSync(path.join(OUT, 'fonts.json'), JSON.stringify(meta) + '\n');
+/* a whole-cluster picture (1920x720, or a preview of that shape) cut to the
+ * hero and the tile */
+function cut(id, img) {
+    {
+        const png = pngRgb(resize(img, HERO.w, HERO.h));
+        fs.writeFileSync(path.join(OUT, id + '.png'), png);
+        /* the tile: as tall as the tile, its middle (a cover crop) */
+        const tw = Math.round(img.w * THUMB.h / img.h), small = resize(img, tw, THUMB.h);
+        const thumb = pngRgb(crop(small, Math.floor((tw - THUMB.w) / 2), 0, THUMB.w, THUMB.h));
+        fs.writeFileSync(path.join(OUT, id + '.thumb.png'), thumb);
+        console.log(id + '.png ' + (png.length / 1024).toFixed(0) + ' KB, thumb ' + (thumb.length / 1024).toFixed(0) + ' KB');
+    }
 }
 
 /* component.json: every file in picker/, flat as picker.<name> */
@@ -132,8 +124,9 @@ function main() {
     if (!fs.existsSync(OUT)) fs.mkdirSync(OUT);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'picker-'));
     const only = arg('--only');
-    if (process.argv.indexOf('--fonts') < 0 || only) previews(only ? only.split(',') : shipped(), tmp);
-    if (!only) fonts(tmp);
+    if (process.argv.indexOf('--resize') >= 0) {
+        (only ? only.split(',') : shipped()).forEach((id) => cut(id, readPng(fs.readFileSync(path.join(OUT, id + '.png')))));
+    } else previews(only ? only.split(',') : shipped(), tmp);
     /* a preview of a theme no longer shipped goes */
     const ids = shipped();
     fs.readdirSync(OUT).filter((n) => /^[a-z0-9]+(\.thumb)?\.png$/.test(n) && ids.indexOf(n.split('.')[0]) < 0)

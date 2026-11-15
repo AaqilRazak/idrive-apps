@@ -9,7 +9,7 @@ const T = process.argv[2];
 /* [id, type, widget, name, focusable, first text] */
 const C = [
     [20, 'label', 'LT_Label_1Row', 'clusterStatus', 0, 'Connecting...'],
-    [30, 'button', 'LT_Button_1Row', 'clusterPick', 3, 'Choose with previews (touch the screen)'],
+    [30, 'button', 'LT_Button_1Row', 'clusterPick', 3, 'Touch screen'],
     [31, 'button', 'LT_Button_1Row', 'clusterTheme1', 3, 'Theme'],
     [32, 'button', 'LT_Button_1Row', 'clusterTheme2', 3, 'Theme'],
     [33, 'button', 'LT_Button_1Row', 'clusterTheme3', 3, 'Theme'],
@@ -30,8 +30,8 @@ let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- SPDX-License-Identifier:
 C.forEach(([id, type, widget, , focus]) => {
     xml += `            <component id="${id}" type="${type}" widget="${widget}">\n                <property id="2" value="1"/>\n                <property id="3" value="${focus}"/>\n            </component>\n`;
 });
-/* The screen state (2, ParentState 1): opened while the picker covers the
- * app area. Nothing focusable or touchable on it, because the HMI still
+/* The screen state (2, ParentState 1): opened while the touch screen (the
+ * tool's picker) covers the app area: the app opens it on entry. Nothing focusable or touchable on it, because the HMI still
  * gets every touch on the picker and would press whatever lies under it.
  * BACK (the arrow outside the picker) returns to the main page. */
 xml += '        </layoutGroup>\n    </container>\n' +
@@ -54,7 +54,7 @@ fs.writeFileSync(path.join(dir, 'uiDescription.json'),
         2: { type: 'state', name: 'ST_OnlineApps_VizualyseClusterScreen', components: {
             50: { type: 'title', name: 'clusterScreenTitle', properties: vis, rows: [{ Text: { value: 'SID_CLUSTER_TITLE', type: 'StringId' } }] },
             51: { type: 'label', name: 'clusterScreenNote', properties: Object.assign({}, vis, { Focusable: { value: 0, type: 'UInt' } }),
-                rows: [{ Text: { value: 'The theme picker is on the screen. Back returns here.', type: 'Text' } }] },
+                rows: [{ Text: { value: 'The touch screen is up. List (top right) or Back shows the list.', type: 'Text' } }] },
         } },
     } }, null, 2) + '\n');
 console.log('page: ' + C.length + ' rows');

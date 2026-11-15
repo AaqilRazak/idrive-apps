@@ -17,7 +17,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, '..', 'src')
+SRC = os.path.join(HERE, '..')
 sys.path.insert(0, SRC)
 import touch_reader as tr  # noqa: E402
 

@@ -4,14 +4,22 @@ The iDrive 7 app for [vizualyse-cluster](../../native/vizualyse-cluster)
 (Cluster themes): whole-cluster themes drawn over the instrument cluster.
 The tile is **Cluster themes**.
 
+## The touch screen, and the list
+
+Opening the app opens its **touch screen** (the tool's picker, below) by
+itself while parked. Its **List** button (top right), BACK or the car
+starting to move bring the page back: the iDrive list, all of it usable
+with the controller. The list's first row, **Touch screen**, opens the touch
+screen again. The handling is the platform's `app/touch_mode`.
+
 ## The page
 
 One `LT_State_Wide` page, all of it usable with the iDrive controller:
 
 | Row | What it does |
 |---|---|
-| status | `On the cluster: G20 inspired 1 (Comfort)`, `Off - the car's own cluster shows`, `The picker is on the screen - the back arrow on the left returns here`, `Trying a theme on the cluster...`, `Error: ...` (a failed command's, for 10 s), `The cluster: ...` (the tool's), `The cluster themes tool is not running - ...` |
-| Choose with previews (touch the screen) | opens the empty screen state, then `picker`: the tool's picker over the app area (below). Off while the car moves (`(only while parked)`) |
+| status | `On the cluster: G20 inspired 1 (Comfort)`, `Off - the car's own cluster shows`, `The touch screen is up - List (top right) or the back arrow returns here`, `Trying a theme on the cluster...`, `Error: ...` (a failed command's, for 10 s), `The cluster: ...` (the tool's), `The cluster themes tool is not running - ...` |
+| Touch screen | opens the empty screen state, then `picker`: the tool's picker over the app area (below). Off while the car moves (`(only while parked)`) |
 | a row per family (eight) | `use` with that family: on the cluster, themes on. The one in use says `In use: ` |
 | Sport or Comfort: by the drive mode / always Sport / always Comfort | `mode`, the next of the three |
 | The car's strip under the theme: shown / covered (black) | `cover` |
@@ -28,14 +36,15 @@ title bar or left strip) and read by touch: a large preview of every theme
 in Sport and Comfort, Use, a 10 s Try on the cluster while parked, Auto /
 Sport / Comfort, Turn themes off ([the tool's README](../../native/vizualyse-cluster/README.md#the-picker-on-the-central-screen)).
 
-As vizualyse_steam: the HMI still gets every touch on it, so **Choose**
-first opens the screen state (`ST_OnlineApps_VizualyseClusterScreen`, a
-title and one label, nothing to press) and sends `picker` once it is
-visible; while the picker is up every button of the main page is disabled
-too. Should the HMI not open the screen state within 3 s, the picker goes
-over the main page (its buttons disabled) and the log says why. BACK, HOME,
-another app, and a pop-up, a call or a warning taking the focus for 300 ms
-hide it (`picker` with `on: false`). The app also hides it as it shuts down.
+The HMI still gets every touch on it, so the app first opens the screen
+state (`ST_OnlineApps_VizualyseClusterScreen`, a title and one label,
+nothing to press) and sends `picker` once it is visible. Should the HMI not
+open the screen state within 3 s, the picker goes over the main page (its
+buttons disabled) and the log says why. BACK, HOME, another app, and a
+pop-up, a call or a warning taking the focus for 300 ms hide it (`picker`
+with `on: false`). The tool's `{"ev":"list"}` (its List button) and the
+car starting to move close the screen state (`closeState`, or the page
+opened if that fails). The app also hides the picker as it shuts down.
 
 The iDrive controller works this page, not the picker (the knob reaches only
 RHMI states: knowledge/input.md); everything the picker does but Try and the

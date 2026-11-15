@@ -102,30 +102,44 @@ not shipped.
 
 ### The picker on the central screen
 
-The app opens its empty screen state, then sends `{"cmd":"picker","on":true}`;
-BACK, HOME, another app or a pop-up make it send `on: false`. The picker
-shows only while the car is not known to move (hidden above 3 km/h, as
-Browser and Steam).
+The picker is this tool's **touch screen**, built from the platform's touch
+kit (`tool/touch_ui`, shared by every app's touch screen). The app opens
+it when the app is opened: its empty screen state, then
+`{"cmd":"picker","on":true}`; BACK, HOME, another app or a pop-up make it
+send `on: false`. The **List** button (top right) hides the picker and
+sends the app `{"ev":"list"}`: the app goes back to its iDrive list. The
+picker shows only while the car is not known to move (hidden above 3 km/h,
+as Browser and Steam); the app then shows its list.
 
-- **The picture** (`src/picker.js`, `src/picker_view.js`, `src/ui_draw.js`):
-  one opaque RGBX pixmap the size of mgu-render's app area (1790x638 at
-  +108+82: the HMI's title bar and its left strip with the back arrow stay
-  the HMI's), drawn in JS from the previews and glyph atlases built off the
-  car (`picker.*`, `tools/picker_build.js`): a large preview of the chosen
-  family (swipe it or press < >), the eight families as tiles, Preview Sport
-  / Comfort, Use, Try, Auto / Sport / Comfort, Turn themes off. Only the
-  regions that change go to mgu-render again (a press: about 27,000 px; a new
-  preview: the preview's 470,000); an IMAGE op at least once a second keeps it
-  up. About 8 ms a picture on a desktop once the previews are decoded
-  (16 PNGs, 2.3 MB in the kit, decoded as first shown).
-- **Touch** (`src/touch_reader.py`, mgu-python): an AF_PACKET copy of the
-  display's touch PDUs on vlan73, the platform's `native/touch` decoding in
-  Python, so the tool needs nothing compiled; the socket opened as root,
-  then the reader drops to `nobody`. Nothing is claimed (a claim through
-  mgu-render restarted the unit); the HMI gets every touch too, on an empty
-  state. A tap is a down and an up on the same target within 24 px; a swipe
-  of 80 px across the large preview goes to the next family. Targets are 50
-  px or more (`test/picker_test.js` checks).
+- **The screen** (`src/picker_view.js`): two tabs in the kit's frame.
+  *Themes*: a large preview of the chosen family (swipe it for the next),
+  its name, Preview Sport / Comfort, Use this theme, Try on the cluster (10
+  s, parked), and the eight families as tiles. *Settings*: Auto / Sport /
+  Comfort, Cluster themes on / off, Cover the car's bottom strip, and what
+  shows now. The status line says what is on the cluster.
+- **The picture** (`ui_host.js`, `ui_kit.js`, `ui_canvas.js`): one opaque
+  RGBX pixmap the size of mgu-render's app area (1790x638 at +108+82: the
+  HMI's title bar and its left strip with the back arrow stay the HMI's).
+  Only the rectangles that changed are drawn and sent (a press: its button
+  alone, 60,000 px; a new family: the preview and two tiles); at most a
+  frame every 33 ms; an IMAGE op at least once a second keeps it up. The
+  previews (`picker.*`, built at the size drawn by `tools/picker_build.js`)
+  are decoded one every 20 ms after the picker shows, before they are
+  needed.
+- **Speed** (2026-11-15): the theme list is read once. Before 0.4.0 every
+  frame and every touch event (each finger movement too) re-read and parsed
+  all 19 theme files (685 KB), and the 25 Hz tick did too while a theme
+  showed. Node 8 on one desktop core: a tap on a tile took 103 ms before and
+  16 ms now; a swipe 170 ms and 11 ms (the car's Atom is maybe 3-4 times
+  slower). The tool logs `ui: N touches to pixels: median ..., max ...`.
+- **Touch** (`touch_reader.py`, mgu-python, from the kit): an AF_PACKET copy
+  of the display's touch PDUs on vlan73, the platform's `native/touch`
+  decoding in Python, so the tool needs nothing compiled; the socket opened
+  as root, then the reader drops to `nobody`. Nothing is claimed (a claim
+  through mgu-render restarted the unit); the HMI gets every touch too, on
+  an empty state. A tap is a down and an up on the same target within 24 px;
+  a swipe of 80 px across the large preview goes to the next family.
+  Targets are 64 px or more (`test/picker_test.js` lints both tabs).
 - The iDrive controller works the app's own page (a row per family, Sport or
   Comfort, the strip, on / off), not the picker: the knob reaches only RHMI
   states (knowledge/input.md).
@@ -133,12 +147,11 @@ Browser and Steam).
 | File | |
 |---|---|
 | `src/server.js` | settings, the source, the mode, the tick, Try, the control socket |
-| `src/picker.js` | the picker: its state, mgu-render (one pixmap, the changed regions), the touch reader, taps and swipes |
-| `src/picker_view.js` | the picker's layout, what it draws for a model, what a touch hits (pure) |
-| `src/ui_draw.js` | a small RGBX canvas: rounded rectangles, pictures, atlas text, resizing |
-| `src/png.js` | a PNG reader (the previews) and writer (checks) |
-| `src/touch_reader.py` | the display's touches, read passively (mgu-python) |
-| `picker/` | the picker's previews (`<id>.png`, `<id>.thumb.png`) and fonts (`fonts.json`, `f*.font.gz`), built by `tools/picker_build.js` (committed; shipped as `picker.*`) |
+| `src/picker.js` | the picker: its model, the previews, its actions, on the kit's `TouchScreen` |
+| `src/picker_view.js` | the picker's two tabs as the kit's widgets (pure) |
+| `src/ui_*.js`, `src/ui.*`, `src/touch_reader.py` | copies of the platform's touch kit (`tool/touch_ui`; synced, not committed) |
+| `src/png.js` | a PNG reader and writer for the build tools |
+| `picker/` | the picker's previews (`<id>.png`, `<id>.thumb.png`) at the size drawn, built by `tools/picker_build.js` (committed; shipped as `picker.*`) |
 | `src/theme_runtime.js` | a built theme on cluster-render: assets (kept across a switch), effect layers, binds, uniforms; checks the theme and its textures' hashes first |
 | `src/theme_core.js` | the logic's output to uniforms, text layout, the limits (shared with the preview) |
 | `src/sim.js` | the bench drives (shared with the preview) |
@@ -150,7 +163,8 @@ Browser and Steam).
 | `tools/tiles.js` | the static art as its distinct tiles and their map, one texture (THEMES.md "Static art") |
 | `tools/theme_table.js` | the themes' numbers |
 | `tools/preview.html`, `preview_serve.js`, `preview_shot.js` | the off-car preview in WebGL 1 |
-| `tools/picker_build.js` | the picker's previews (a `preview_shot.js` of each theme at 9.5 s, cut to size) and fonts (headless Chrome), listed in component.json |
+| `tools/picker_build.js` | the picker's previews (a `preview_shot.js` of each theme at 9.5 s, cut to the sizes in `picker_view.js`; `--resize` from the ones there), listed in component.json |
+| `tools/ui_fonts.js` | the touch kit's fonts (headless Chrome), into `platform/tool/touch_ui/<version>` |
 
 ## Off the car
 
@@ -164,9 +178,9 @@ node tools/preview_shot.js g20i2 9.5 shot.png   # one moment, as a PNG
 node test/shader_lint.js                        # the shader rules
 node test/themes_test.js                        # every theme: limits, hashes, logic on both drives and with no signals
 node test/tool_test.js                          # the tool against a fake cluster-render
-node tools/picker_build.js                      # the picker's previews and fonts (after a theme changes)
+node tools/picker_build.js                      # the picker's previews (after a theme changes)
 node test/picker_test.js [out.png]              # the picker: its look, then the tool with scripted touches
-python3 test/touch_reader_test.py               # the touch reader (as root in a container: it drops to nobody)
+node ../../platform/tool/touch_ui/1.0.0/test/touch_ui_test.js   # the touch kit (its touch reader: test/touch_reader_test.py there)
 ```
 
 ## On the car, still to find out
@@ -181,6 +195,8 @@ python3 test/touch_reader_test.py               # the touch reader (as root in a
   values); the drive mode picking Sport or Comfort. Not read yet: the speed
   limit, cruise speed, navigation, electric power; `fuelPct` (the car
   gives litres). Where each comes from: `knowledge/vehicle-signals.md`.
-- The picker: how long the first picture takes on the unit's Atom.
+- The picker (0.4.0): the time from a touch to its pixels on the unit's
+  Atom (the log's `ui: ... touches to pixels`), and the CPU the tool takes
+  while a theme shows, now that the theme list is read once.
 
 Not yet: a phone page (TODO.md).

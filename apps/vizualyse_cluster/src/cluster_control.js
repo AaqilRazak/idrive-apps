@@ -4,7 +4,8 @@
  * The app's side of the vizualyse-cluster tool's control socket:
  * /dev/shm/vizualyse-cluster/ctl.sock, a Unix stream socket, newline-delimited
  * JSON. The tool sends {"ev":"status", ...} on connect, after every command
- * and once a second, and {"ev":"error","error":...} for a failed command;
+ * and once a second, {"ev":"error","error":...} for a failed command and
+ * {"ev":"list"} when the touch screen's List corner is tapped (back to the list);
  * the app sends {"cmd":"enable"} / {"cmd":"disable"} (themes on the cluster
  * or the car's own), {"cmd":"theme","id":family}, {"cmd":"mode","mode":
  * "auto"|"sport"|"comfort"}, {"cmd":"cover","on":bool} (black over the
@@ -77,6 +78,8 @@ class ClusterControl extends EventEmitter {
                 try { ev = JSON.parse(line); } catch (e) { continue; }
                 if (!ev) continue;
                 if (ev.ev === 'status') { this.status = ev; this.emit('change'); }
+                /* the touch screen's List corner: back to the list */
+                else if (ev.ev === 'list') this.emit('list');
                 else if (ev.ev === 'error') {
                     this.lastError = { text: String(ev.error || 'the command failed'), at: Date.now() };
                     this.emit('change');
@@ -158,7 +161,7 @@ class ClusterControl extends EventEmitter {
         if (!s) return 'The cluster themes tool is not running - install Cluster themes (the tool) from the Store';
         const failed = this._commandError();
         if (failed) return ascii('Error: ' + failed);
-        if (s.picker) return 'The picker is on the screen - the back arrow on the left returns here';
+        if (s.picker) return 'The touch screen is up - List (top right) or the back arrow returns here';
         if (s.trying) return 'Trying a theme on the cluster...';
         if (!s.enabled) return "Off - the car's own cluster shows";
         if (s.error) return ascii('The cluster: ' + s.error);

@@ -813,22 +813,30 @@ the picker: [README](native/vizualyse-cluster/README.md#the-picker-on-the-centra
 
 ## All apps: touch
 
-- [ ] **Better touch control on the central screen in every app** (Cast,
-  Moonlight, Browser, Steam, Cluster themes). Today the RHMI pages are made
-  for the iDrive controller: rows and buttons, small targets, nothing you
-  can drag. Each app's page should work well by touch too: large targets
-  (at least 44 px, more while driving is not allowed anyway), direct
-  actions on the picture where it is ours (the passive touch reader,
-  platform `native/touch`, as Browser and Steam use), swipes where they
-  help (themes, pages), and the same actions still on the controller.
-  Find what RHMI lets an app's page do by touch first
-  ([knowledge/idrive-app-ui.md](knowledge/idrive-app-ui.md),
-  [knowledge/input.md](knowledge/input.md)); where it can't, draw our own
-  page in the app area through mgu-render. A shared module for it in the
-  platform once two apps need it: Cluster themes' picker (tool 0.2.0) is
-  the first such page (`ui_draw.js` a small canvas with atlas text,
-  `touch_reader.py` the passive reader in mgu-python, taps and swipes in
-  `picker.js`).
+Every app opens on a touch screen drawn by its tool in the app area, with a
+**List** button (top right) back to its iDrive list: the touch kit, platform
+`tool/touch_ui` (the tool's screen: look, widgets, redrawing only what
+changed) and `app/touch_mode` (the app's screen state, List, BACK, moving).
+Design (Green on graphite, chosen 2026-11-15):
+https://claude.ai/artifact/S5fYduKq97f4mnRczxUpGW. Branch `app-restyle`.
+
+- [ ] **Cluster themes on the car** (tool 0.4.0, app 0.3.0, the first on the
+  kit): opening the app opens the picker; List, BACK and driving off bring
+  the list back (`closeState` is untried on our HMI: the log says if it
+  failed and the page was opened instead); the time from a touch to its
+  pixels (`ui: ... touches to pixels` in the tool's log) and the tool's CPU
+  while a theme shows (the theme list is read once now: before, 25 times a
+  second).
+- [ ] **Cast, Moonlight, Steam, Browser on the kit**: each tool draws its
+  touch screen (the artifact's layouts), each app gets a screen state and
+  `app/touch_mode`. Cast's CarPlay tab: a live preview of the map (a second,
+  small ffmpeg output, about 4 fps).
+- [ ] **Undecided** (the recommendation in brackets): the touch screens hide
+  while the car moves and the list shows (yes, all five); the knob switching
+  to the list by itself (not done: a focusable row on the screen state
+  would be pressed by touches on the picture; the knob read through FrontCCU,
+  as in "The picker, next" under Cluster themes, would do it); Steam's game art (plain
+  tiles first).
 
 ## Platform (platform/<side>/<module>/<version>)
 

@@ -113,6 +113,8 @@ function startControl(opts) {
 
     return {
         broadcast: broadcast,
+        /* an event to every client (the picker's List corner: {"ev":"list"}) */
+        send: (obj) => clients.forEach((s) => send(s, obj)),
         close() {
             clearInterval(timer);
             clearInterval(recheck);

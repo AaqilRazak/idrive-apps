@@ -108,7 +108,7 @@ function mode() {
 /* the theme of the chosen family for the mode; the family's other one if it has no such mode */
 function variant() {
     let list = [];
-    try { list = runtime.list(); } catch (e) { /* none */ }
+    try { list = themeList(); } catch (e) { /* none */ }
     const fam = list.filter((x) => x.family === settings.theme || x.id === settings.theme);
     const m = mode();
     const pick = fam.filter((x) => x.mode === m)[0] || fam.filter((x) => x.id === settings.theme)[0] || fam[0];
@@ -118,6 +118,12 @@ function variant() {
 /* ---- the cluster ---- */
 const cr = new ClusterRender('vizualyse-cluster', RENDER_SOCKET);
 const runtime = new ThemeRuntime(cr, HERE, log);
+/* the shipped themes, read once: they never change while the tool runs, and a
+ * read parses every theme.json (19 files, ~685 KB). variant() asks 25 times a
+ * second and the picker once a frame; reading each time cost an estimated
+ * 26 ms a read on the car, most of a core while a theme showed. */
+let themeCache = null;
+function themeList() { if (!themeCache) themeCache = runtime.list(); return themeCache; }
 runtime.cover = !!settings.cover;
 let lastError = null, layerStates = {}, target = null, started = 0, last = 0;
 cr.on('layer', (ref, state, reason) => { layerStates[ref] = state; if (state === 'error') log('render: layer ' + ref + ' ' + state + (reason ? ': ' + reason : '')); });
@@ -141,7 +147,7 @@ function hide(why) { if (runtime.theme) { runtime.stop(); layerStates = {}; log(
 let trial = null;
 function themeById(id) {
     let list = [];
-    try { list = runtime.list(); } catch (e) { /* none */ }
+    try { list = themeList(); } catch (e) { /* none */ }
     return list.filter((x) => x.id === id)[0] || null;
 }
 function tryTheme(id) {
@@ -181,7 +187,7 @@ const timer = setInterval(() => {
 }, TICK_MS);
 
 function status() {
-    const themes = (() => { try { return runtime.list(); } catch (e) { return []; } })();
+    const themes = (() => { try { return themeList(); } catch (e) { return []; } })();
     return { enabled: settings.enabled, theme: settings.theme, mode: settings.mode, cover: !!settings.cover, showing: runtime.theme ? runtime.theme.id : null,
         source: demoSource() ? 'demo' : 'car', demo: (!!trial || demoSource()) && demoAllowed(), bench: settings.bench, panel: target,
         moving: moving(), speed: car.kmh, themes: themes.map((x) => ({ id: x.id, title: x.title, family: x.family, mode: x.mode })),
@@ -194,7 +200,7 @@ function trying() { return trial ? { id: trial.id, family: trial.family, left: M
 /* ---- the picker on the central screen ---- */
 function familyTitle(fam) {
     let list = [];
-    try { list = runtime.list(); } catch (e) { /* none */ }
+    try { list = themeList(); } catch (e) { /* none */ }
     const t = list.filter((x) => x.family === fam && x.mode !== 'comfort')[0] || list.filter((x) => x.family === fam)[0];
     return t ? String(t.title).replace(/\s*·.*$/, '') : fam;
 }
@@ -205,7 +211,7 @@ function pickerLine() {
     }
     if (!settings.enabled) return { text: "Themes are off: the car's own cluster shows" };
     if (lastError) return { text: 'The cluster: ' + lastError, warn: true };
-    const how = settings.mode === 'auto' ? 'Sport or Comfort by the drive mode' : 'always ' + settings.mode;
+    const how = settings.mode === 'auto' ? 'Sport or Comfort by the drive mode' : 'always ' + (settings.mode === 'sport' ? 'Sport' : 'Comfort');
     return { text: 'On the cluster: ' + familyTitle(settings.theme) + ', ' + how };
 }
 const picker = new Picker({
@@ -213,18 +219,26 @@ const picker = new Picker({
     touch: { python: PYTHON, iface: TOUCH_IFACE, src: TOUCH_SRC, file: TOUCH_FILE,
         cmd: process.env.CLUSTER_TOUCH_CMD ? JSON.parse(process.env.CLUSTER_TOUCH_CMD) : null },
     state: () => {
-        const s = status(), line = pickerLine();
-        return { themes: s.themes, enabled: s.enabled, theme: s.theme, look: s.look, mode: s.mode,
-            trying: s.trying, canTry: s.canTry, line: line.text, lineWarn: !!line.warn };
+        const s = status(), line = pickerLine(), m = moving();
+        const showing = runtime.theme ? String(runtime.theme.title || runtime.theme.id) : 'nothing (the car\'s own cluster)';
+        return { themes: s.themes, enabled: s.enabled, theme: s.theme, look: s.look, mode: s.mode, cover: s.cover,
+            trying: s.trying, canTry: s.canTry, line: line.text, lineWarn: !!line.warn,
+            /* UK units: the speed in mph */
+            right: m === false ? 'Parked' : car.kmh === null ? 'Speed unknown' : Math.round(car.kmh * 0.621371) + ' mph',
+            info: [['Showing', showing], ['Readings', s.signals.length + ' from the car'], ['Source', s.demo ? 'the bench drive' : 'the car'],
+                ['Look now', s.look === 'sport' ? 'Sport' : 'Comfort']] };
     },
     actions: {
         use: (fam) => command({ cmd: 'use', id: fam }),
         try: (id) => tryTheme(id),
         mode: (m) => command({ cmd: 'mode', mode: m }),
-        off: () => command({ cmd: 'disable' }),
+        enable: (on) => command({ cmd: on ? 'enable' : 'disable' }),
+        cover: (on) => command({ cmd: 'cover', on: on }),
     },
 });
 picker.on('change', () => { if (control) control.broadcast(); });
+/* the List corner: the app goes back to its iDrive list (and hides the picker) */
+picker.on('list', () => { picker.hide('List'); if (control) { control.send({ ev: 'list' }); control.broadcast(); } });
 /* the try's countdown and what the app changed, once a second */
 const pickerTimer = setInterval(() => { if (picker.shown()) picker.refresh(); }, 1000);
 
@@ -249,7 +263,7 @@ function command(c) {
     if (c.cmd === 'try') return tryTheme(c.id);
     if (c.cmd === 'theme' || c.cmd === 'use') {
         let known = [];
-        try { known = runtime.list(); } catch (e) { /* none */ }
+        try { known = themeList(); } catch (e) { /* none */ }
         if (!/^[a-z0-9]+$/.test(c.id || '') || !known.some((x) => x.id === c.id || x.family === c.id)) return 'no theme ' + c.id;
         settings.theme = c.id;
         /* use: this family, and on (the picker's Use) */

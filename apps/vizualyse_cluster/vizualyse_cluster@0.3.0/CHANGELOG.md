@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- The touch screen first: opening the app opens the theme picker on the
+  screen by itself (while parked). Its List button (top right), BACK or
+  the car starting to move bring this list back; the list's first row,
+  Touch screen, opens it again (platform app/touch_mode). Needs Cluster
+  themes 0.4.0.
+
 ## 0.2.1
 
 - The fuel gauge: litres as a share of the 330e's 40 l tank.

@@ -61,7 +61,7 @@
           "rows": [
             {
               "Text": {
-                "value": "Choose with previews (touch the screen)",
+                "value": "Touch screen",
                 "type": "Text"
               }
             }
@@ -349,7 +349,7 @@
           "rows": [
             {
               "Text": {
-                "value": "The theme picker is on the screen. Back returns here.",
+                "value": "The touch screen is up. List (top right) or Back shows the list.",
                 "type": "Text"
               }
             }
