@@ -19,6 +19,10 @@
  *   the app area (screen.js); its sound into SmartXbar (pcm_play.py).
  * - Only while parked: the iDrive app sends the speed; above 3 km/h the game
  *   is hidden and can't be shown (it keeps running; Stop ends it).
+ * - The touch screen (touch_screen.js, the platform's touch kit): the
+ *   library, the running game, Settings and the phone page's QR code in the
+ *   app area, while the iDrive app's screen state is open; the game's
+ *   picture goes up over the same state in its place, one at a time.
  * - Nothing starts by itself: a game runs only when asked. While one runs,
  *   state/game-running says which; found at start, the unit restarted
  *   during a game, and the phone page and app say so.
@@ -40,7 +44,8 @@ const steam = require('./steam.js');
 const { Game } = require('./game.js');
 const { Speakers } = require('./speakers.js');
 const usb = require('./usb.js');
-const { Screen, message: screenMessage } = require('./screen.js');
+const { Screen, message: screenMessage, CLIENT: RENDER_CLIENT } = require('./screen.js');
+const { SteamTouch } = require('./touch_screen.js');
 const firewall = require('./firewall.js');
 const { startControl } = require('./control.js');
 const { Bus } = require('./mqtt_bus.js');
@@ -168,6 +173,10 @@ unpack.mkdirp(env.ROOT, 0o755);
 try { fs.chmodSync(env.ROOT, 0o755); } catch (e) { /* not ours */ }
 const TOKEN = token();
 function link() { const ip = uplinkIp(); return ip ? 'http://' + ip + ':' + PORT + '/?t=' + TOKEN : null; }
+/* the link as last read (the touch screen's, from memory): every 10 s, and as it shows */
+let linkNow = null;
+function readLink() { try { linkNow = link(); } catch (e) { linkNow = null; } }
+readLink();
 
 /* ---- settings, library ---------------------------------------------------- */
 
@@ -220,6 +229,9 @@ function present(g) { const id = gameStick(g); return !id || !!usb.find(id); }
 
 /* sticks plugged in or pulled: a game or download on a pulled one ends */
 let stickIds = '';
+/* the sticks plugged in (ids), as last swept: the touch screen's, from memory */
+let stickSet = new Set();
+try { stickSet = new Set(usb.sticks().map((s) => s.id)); } catch (e) { /* none */ }
 setInterval(() => {
     let gone = [];
     try { gone = usb.sweep(log); } catch (e) { log('usb: ' + e.message); }
@@ -227,7 +239,9 @@ setInterval(() => {
         if (game && game.state !== 'ended' && usb.idOfPath(game.o.dir) === id) stopGame('the USB stick ' + id + ' was removed');
         if (download && usb.idOfPath(download.o.dir) === id && ['done', 'failed', 'stopped'].indexOf(download.state) < 0) download.stop();
     });
-    const ids = usb.sticks().map((s) => s.id + ':' + s.fs).join(' ');
+    const now = usb.sticks();
+    stickSet = new Set(now.map((s) => s.id));
+    const ids = now.map((s) => s.id + ':' + s.fs).join(' ');
     if (ids !== stickIds) {
         stickIds = ids;
         log('usb: sticks ' + (ids || 'none'));
@@ -338,27 +352,33 @@ function setWinston(on) {
     settings.winston = on;
     saveSettings();
     log('winston: ' + (on ? 'on: pictures straight onto the screen through Winston (from the next show)' : 'off: compatibility mode, through mgu-render'));
-    if (screen.shown()) { hide('the output changed'); show(); }
+    if (screen.shown()) { hide('the output changed', true); show(); }
     if (control) control.broadcast();
     return null;
 }
 
+/* The game on the screen. One picture at a time: the touch screen goes
+ * first, and comes back when the game's picture goes (hide) while the app's
+ * screen state is still open (touchUi.gameGone). */
 function show() {
     if (moving()) return 'not while driving';
     if (!game || game.state === 'ended') return 'no game is running';
     wantShown = true;
     if (screen.shown()) return null;
+    touchUi.gameUp();
     const e = screen.show(VIEW, via(), game);
-    if (e) { wantShown = false; return e; }
+    if (e) { wantShown = false; touchUi.gameGone(); return e; }
     log('screen: shown (' + screen.via + ')');
     startTouch();
     return null;
 }
 
-function hide(why) {
+/* again: shown again at once (another output): the touch screen stays down */
+function hide(why, again) {
     wantShown = false;
     stopTouch();
     if (screen.shown()) { screen.hide(); log('screen: hidden (' + why + ')'); }
+    if (!again) touchUi.gameGone();
 }
 
 /* ---- touch: the display's touches on the shown game become its pointer ----
@@ -479,8 +499,102 @@ function setSpeed(kmh) {
     const v = Number(kmh);
     vehicle.kmh = isFinite(v) ? v : null;
     vehicle.at = Date.now();
-    if (moving() && (wantShown || screen.shown())) hide('driving (' + v.toFixed(0) + ' km/h)');
+    if (moving()) {
+        if (wantShown || screen.shown()) hide('driving (' + v.toFixed(0) + ' km/h)');
+        touchUi.moved();
+    }
 }
+
+/* ---- the touch screen (touch_screen.js, touch_view.js) -------------------------
+ * Its model, from memory only (a frame asks once): the settings, the
+ * library, the game's and the download's state, the sticks and the link as
+ * last read. */
+const PYTHON = process.env.STEAM_PYTHON || '/var/opt/mgu-python/current/bin/python3';
+
+function speedText() {
+    if (vehicle.kmh === null || Date.now() - vehicle.at > 10000) return 'Speed unknown';
+    return moving() ? 'Moving · ' + Math.round(vehicle.kmh * 0.621371) + ' mph' : 'Parked';
+}
+
+function touchLine() {
+    const g = game && game.state !== 'ended' ? game : null;
+    if (!settings.enabled) return { tone: '', text: 'Steam is off: turn it on in Settings' };
+    if (bundle.state === 'unpacking' || bundle.state === 'checking') return { tone: 'warn', text: 'Installing Steam on the car (a few minutes, once)...' };
+    if (bundle.state === 'failed' || bundle.error) return { tone: 'bad', text: 'Error: ' + (bundle.error || 'the tool could not be installed') };
+    if (mem.note && mem.oomAt && Date.now() - Date.parse(mem.oomAt) < 120000) {
+        return { tone: 'warn', text: 'Out of memory: the game needed more than ' + settings.memMb + ' MB (phone page: Memory)' };
+    }
+    if (g && moving()) return { tone: 'warn', text: 'Only while parked: the car is moving' };
+    if (g && g.state === 'starting') return { tone: 'live', text: 'Starting ' + g.o.name + ' (this can take a minute)...' };
+    if (g) return { tone: 'ok', text: g.o.name + ' is running. Show puts it on the screen' };
+    if (askedOffNote) return { tone: 'warn', text: 'The game ' + askedOffNote };
+    if (restartNote) return { tone: 'warn', text: 'Note: ' + restartNote };
+    if (!Object.keys(library).length) return { tone: '', text: 'No games yet: scan the QR code in Settings with your phone' };
+    return { tone: 'ok', text: 'Ready: pick a game' };
+}
+
+function touchDownload() {
+    const d = download;
+    if (!d) return null;
+    const name = (library[d.o.appId] && library[d.o.appId].name) || names[d.o.appId] || 'App ' + d.o.appId;
+    const text = {
+        starting: 'Steam: ' + (d.note || 'starting...'),
+        password: 'Steam asks for the password: answer on the phone page',
+        code: 'Steam Guard asks for a code: answer on the phone page',
+        confirm: 'Steam Guard: approve the sign-in in the Steam app',
+        downloading: 'Downloading ' + name + ' · ' + Number(d.percent || 0).toFixed(0) + ' %',
+        done: name + ' is installed',
+        failed: 'Download failed: ' + (d.note || ''),
+        stopped: 'Download cancelled',
+    }[d.state] || String(d.state);
+    return { text: text, percent: d.state === 'downloading' ? Number(d.percent || 0) : null };
+}
+
+function touchLibrary() {
+    const busy = download && ['done', 'failed', 'stopped'].indexOf(download.state) < 0 ? download.o.appId : null;
+    return Object.keys(library).map((id) => {
+        const x = library[id], stick = gameStick(x), here = !stick || stickSet.has(stick), appId = Number(id);
+        const why = busy === appId ? 'Downloading' : !x.exe ? '(no program found)' : !here ? '(USB stick not plugged in)' : null;
+        return { appId: appId, name: x.name || 'App ' + id, playable: !why, why: why };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* the resolutions for the touch screen: a short name and the shape */
+const RES_TOUCH = RESOLUTIONS.map((r) => {
+    const note = /\(([^)]*)\)/.exec(r.name), parts = note ? note[1].split(', ') : [];
+    const shape = parts[0] === '16:9' ? '16:9' : 'screen';
+    const rest = parts.filter((p) => p !== '16:9' && p !== 'the screen\'s shape').join(', ');
+    return { id: r.id, shape: shape, short: r.w + ' × ' + r.h + (rest ? ' · ' + rest : '') };
+});
+
+function touchModel() {
+    const g = game;
+    const live = !!(g && g.state !== 'ended');
+    return {
+        enabled: settings.enabled, ready: bundle.state === 'ready', line: touchLine(), right: speedText(),
+        game: g ? { appId: g.o.appId, name: g.o.name, state: g.state, fps: g.stats.fps, gpuBuffers: !!g.gpuBuffers, note: g.note, shown: screen.shown() } : null,
+        running: live, moving: moving(), library: touchLibrary(), download: touchDownload(),
+        resolution: settings.resolution, upscale: settings.upscale, resolutions: RES_TOUCH, link: settings.enabled ? linkNow : null,
+    };
+}
+
+const touchUi = new SteamTouch({
+    dir: HERE, clientPath: RENDER_CLIENT, log: log,
+    touch: { python: PYTHON, iface: TOUCH_IFACE, src: TOUCH_SRC, file: TOUCH_FILE,
+        cmd: process.env.STEAM_UI_TOUCH_CMD ? JSON.parse(process.env.STEAM_UI_TOUCH_CMD) : null },
+    state: touchModel, moving: moving, gameShown: () => screen.shown(),
+    actions: {
+        show: () => show(),
+        stop: () => stopGame('stopped on the touch screen'),
+        play: (appId) => play(appId),
+        resolution: (id) => setResolution(id),
+        upscale: (id) => setUpscale(id),
+        enable: (on) => { setEnabled(!!on); return null; },
+    },
+});
+touchUi.on('change', () => { if (control) control.broadcast(); });
+/* the List corner: the app goes back to its iDrive list (the touch screen is hidden) */
+touchUi.on('list', () => { if (control) { control.send({ ev: 'list' }); control.broadcast(); } });
 
 /* ---- downloads ------------------------------------------------------------------- */
 
@@ -918,7 +1032,7 @@ function play(appId) {
     x.on('winston-lost', () => {
         winstonNote = 'the connection to Winston was lost: back on mgu-render';
         log('winston: ' + winstonNote);
-        if (game === x && screen.shown() && screen.via === 'winston') { hide('Winston went'); show(); }
+        if (game === x && screen.shown() && screen.via === 'winston') { hide('Winston went', true); show(); }
         if (control) control.broadcast();
     });
     x.on('state', (st) => {
@@ -940,6 +1054,8 @@ function play(appId) {
                 }, 1000);
             }
         }
+        touchUi.onGame(x);
+        touchUi.refresh();
         if (control) control.broadcast();
     });
     /* its window bigger than the screen Wine had (wl-sink's output, the
@@ -1065,6 +1181,8 @@ function status() {
             /* the controllers in use: [{ player, name }] (steam-pads) */
             pads: Object.keys(game.pads || {}).map((k) => ({ player: Number(k) + 1, name: game.pads[k] })) } : null,
         running: !!g, shown: screen.shown(), speed: vehicle.kmh, moving: moving(),
+        /* the touch screen: up; wanted (the app's screen state is open: up whenever the game is not) */
+        ui: touchUi.shown(), uiWanted: touchUi.wanted,
         winston: { on: winstonOut, connected: !!(g && g.winston), via: screen.via, note: winstonNote },
         bus: bus.state(), busNote: askedOffNote,
         settings: { where: settings.where, resolution: settings.resolution, fps: settings.fps, memMb: settings.memMb, sound: settings.sound, volume: settings.volume, cellId: settings.cellId || 0, upscale: settings.upscale },
@@ -1168,6 +1286,8 @@ function command(c) {
     if (c.cmd === 'speed') { setSpeed(c.kmh); return null; }
     if (c.cmd === 'enable') { setEnabled(true); return null; }
     if (c.cmd === 'disable') { setEnabled(false); return null; }
+    /* the touch screen, on the app's screen state (Steam off too: its switch is there) */
+    if (c.cmd === 'ui') return touchUi.want(!!c.on);
     if (!settings.enabled) return 'Steam is off';
     if (c.cmd === 'show') return show();
     if (c.cmd === 'hide') { hide('hidden on the iDrive page'); return null; }
@@ -1186,6 +1306,7 @@ function shutdown(sig) {
     if (stopping) return;
     stopping = true;
     log('stopping (' + sig + ')');
+    touchUi.stop('the tool stops');
     hide('the tool stops');
     if (download) download.stop();
     removeFirewall();
@@ -1207,6 +1328,7 @@ speakers.recover();
 control = startControl({ app: 'vizualyse_steam', status: status, command: command, log: log });
 setInterval(writeDns, 10000);
 writeDns();
+setInterval(readLink, 10000);
 
 ensureBundles((err) => {
     if (err) {

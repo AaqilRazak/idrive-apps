@@ -20,16 +20,58 @@ rebuilt `ntdll.so`, below).
    ([apps/vizualyse_steam](../../apps/vizualyse_steam)) from the Store. The
    first start unpacks Proton, its runtime and a Windows prefix (about
    1.3 GB in `/var/opt`, a few minutes; the app says so).
-2. Open **Steam** on the iDrive, scan the QR code with the phone whose
+2. Open **Steam** on the iDrive: it opens on its touch screen (below).
+   Scan the QR code (Settings) with the phone whose
    hotspot the car is on. On the phone page: your Steam **account name**,
    then **Install** with the game's app id (the number in its store
    address; **Slay the Spire 2** has a button: 2868840). Steam asks for the
    password and a Steam Guard code (or approval in the Steam app) right on
    the page, once: the car keeps only Steam's sign-in token.
-3. When it is installed, **Play: <game>** on the iDrive page (or Play on
-   the phone). Starting takes a while (Wine, then the game); the game shows
-   by itself once it draws. The back arrow on the left (or HOME, a pop-up,
-   a call) hides it; it keeps running until **Stop the game**.
+3. When it is installed, tap its tile on the touch screen (or **Play:
+   <game>** on the iDrive list, or Play on the phone). Starting takes a
+   while (Wine, then the game); the game shows by itself once it draws. The
+   back arrow on the left (or HOME, a pop-up, a call) hides it; it keeps
+   running until **Stop the game**.
+
+## The touch screen
+
+The app opens the tool's **touch screen** when it is opened, built from the
+platform's touch kit (`tool/touch_ui`, shared by every app's touch screen):
+its empty screen state, then `{"cmd":"ui","on":true}`. The **List** button
+(top right) hides it and sends the app `{"ev":"list"}`: the app goes back to
+its iDrive list. It shows only while the car is not moving (the speed the
+app sends; hidden above 3 km/h, refused until parked); the app then shows
+its list.
+
+- **The screen** (`src/touch_view.js`): two tabs in the kit's frame.
+  *Library*: the running (or last) game's card (`Running · 28 pictures/s`,
+  its name, **Show on the screen**, **Stop the game**), the download with a
+  progress bar, and the games as plain colour plates (their name and Play,
+  Running now, `(no program found)`, `(USB stick not plugged in)` or
+  Downloading), four a page with < > buttons, never scrolling; a game
+  played here goes on the screen by itself once it draws, if the touch
+  screen is still up. *Settings*: the picture's shape (16:9 or the
+  screen's) and its size (a drop-down of that shape's five), Upscaling (Off,
+  FSR, FSR without sharpening), Steam on / off, and the phone page's link
+  as a QR code (the platform's `common/qrcode`, made once a link). No cover
+  art: the plates need nothing downloaded or decoded.
+- **One picture at a time** (`src/touch_screen.js`): the app's screen
+  state holds the touch screen or the game, each its own mgu-render client
+  (`vizualyse_steam_ui`, `vizualyse_steam`), never both connected. Showing
+  the game (from the touch screen, the app or the phone) hides the touch
+  screen first; when the game's picture goes (it stops, ends, is hidden, or
+  the car moves) the touch screen comes back while the app's state is open
+  (`uiWanted` in the status). `{"cmd":"ui","on":false}` and the List button
+  end that.
+- **The picture** (the kit: `ui_host.js`, `ui_kit.js`, `ui_canvas.js`): one
+  opaque RGBX pixmap the size of mgu-render's app area (1790x638 at
+  +108+82); only the rectangles that changed are drawn and sent, at most a
+  frame every 33 ms. Its model comes from memory only (the settings, the
+  library, the game's and the download's state; the USB sticks and the
+  phone page's link as last read, every 3 s and 10 s).
+- **Touch** (`touch_reader.py`, mgu-python, from the kit): the display's
+  touch PDUs read passively, as `steam-touch` reads them for the game; one
+  of the two readers runs at a time.
 
 ## Why it is built this way
 
@@ -321,7 +363,8 @@ rebuilt `ntdll.so`, below).
 | Wine, the game | uid 12996, group video (44) | Proton's Wine in the prefix, on the unit's Mesa 19, in the memory cgroup |
 | DepotDownloader | uid 12996 | `dotnet DepotDownloader.dll`, HOME `/var/opt/vizualyse-steam/home` |
 | `screen.js` | root | the mgu-render client in layer mode, in the app area |
-| `control.js` | root | `/dev/shm/vizualyse-steam/ctl.sock` for the app only: status; enable, disable, play, stop, show, hide, resolution, upscale, speed |
+| `touch_screen.js`, `touch_view.js` | root | the touch screen (the platform's touch kit: `ui_*.js`, `touch_reader.py`, `ui.*` fonts) and its two tabs; one picture at a time with the game |
+| `control.js` | root | `/dev/shm/vizualyse-steam/ctl.sock` for the app only: status; enable, disable, play, stop, show, hide, ui, resolution, upscale, speed; the `list` event |
 | `firewall.js` | root | the phone page's TCP 8494 on `wlan0`, in memory |
 | `swap.js` | root | the games' swap file on the hard disk: made once, on while a game runs |
 | `deactivate.js` | root | the deactivate hook: the firewall rule and the swap file removed |
@@ -351,6 +394,13 @@ the library (`library.json`), `game-running` while a game runs.
   frames reach the frame file (PRIME buffers on the stub, ~29 pictures/s;
   the right picture on swrast), Direct3D reports HD Graphics 510; Stop ends
   every process of the uid. `VERBOSE=1`, `GREP_LOG=regex` show the tool's log.
+- `node test/touch_test.js [out dir]` checks the touch screen: both tabs in
+  every state lint clean (targets 64 px or more, none overlapping) and are
+  written as PNGs; one picture at a time against a stand-in game and
+  mgu-render client; taps. As root on Linux (Node 8 in a container:
+  `docker run --rm -v "$PWD:/w" ml-unit:18.04-node8 sh -c 'cp -r /w /x && cd /x && node native/vizualyse-steam/test/touch_test.js'`)
+  also `server.js` itself, with no bundles, driven over the control socket
+  with touches from a stand-in reader (`test/fake_touch.js`).
 - `sh test/run_bench.sh` runs Windows test programs through Proton in a
   Debian container with the unit's Mesa (the first bench, below).
 - `sh test/run_play.sh` leaves the tool running in the unit's root
@@ -407,6 +457,10 @@ on the unit):
 - the first game: `wl-sink: ready ... GPU buffers through /dev/dri/renderD128`,
   `game: running`, the pictures per second on the phone page;
 - `dmesg | grep -iE 'i915|blocked for more'` afterwards must show no GPU hang.
+- The touch screen (0.3.0, not tried on the car yet): `ui: shown`, `ui:
+  hidden (the game is shown)` then `ui: shown` again when the game is
+  hidden, and the time from a touch to its pixels (`ui: N touches to
+  pixels: median ...`).
 
 ## Licenses
 

@@ -347,6 +347,28 @@
               }
             }
           ]
+        },
+        "42": {
+          "type": "button",
+          "name": "steamTouch",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "Touch screen",
+                "type": "Text"
+              }
+            }
+          ]
         }
       }
     },
@@ -388,7 +410,7 @@
           "rows": [
             {
               "Text": {
-                "value": "The game is on the screen. Back returns here.",
+                "value": "The touch screen or the game is up. List (top right) or Back shows the list.",
                 "type": "Text"
               }
             }
