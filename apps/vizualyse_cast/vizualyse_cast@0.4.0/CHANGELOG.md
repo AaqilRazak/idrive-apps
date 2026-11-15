@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+- The touch screen first: opening the app opens the tool's touch screen by
+  itself (while parked, where mgu-render is installed): Cast (the QR code,
+  the stream with Stop, play the last stream again, on / off, the QR code
+  on the cluster), CarPlay (a live preview of the map, Map on Cluster / HUD,
+  zoom, the five switches) and Info. Its List button (top right), BACK or
+  the car starting to move bring this list back; the list's new first row,
+  Touch screen, opens it again (platform app/touch_mode). Without
+  mgu-render the app stays on its list.
+- The app reads the car's speed (Vehicle2, in the manifest) and sends it to
+  the tool, and holds the tool's socket while it runs, not only while its
+  page shows.
+- The list keeps every control, also while driving. Its texts are plain
+  ASCII now (`-` for the dashes, `...`).
+- Requires vizualyse-cast 0.4.0.
+
 ## 0.3.6
 
 - No change to the page: its shared file (the QR code) now comes

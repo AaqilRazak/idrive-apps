@@ -15,7 +15,14 @@
  *   claimed while it plays (speakers.js: the car's speakers at the iDrive
  *   volume, no CarPlay phone needed), or CarPlay's input if they can't be had.
  * - The CarPlay second screen: ffmpeg listens on 127.0.0.1:6111 for hook111's
- *   H.264 (carplay_screen.js) and scales it for the cluster map or the HUD.
+ *   H.264 (carplay_screen.js) and scales it for the cluster map or the HUD;
+ *   a small second output feeds the touch screen's live preview.
+ * - The touch screen (touch.js, the platform's touch kit): the iDrive app's
+ *   controls by touch in the central screen's app area, while the app's
+ *   screen state is open ({"cmd":"touch","on":true}); only where mgu-render
+ *   is installed, only while parked (the app sends the speed), and never
+ *   with a stream on this screen (the same mgu-render client name: one at a
+ *   time; it comes back when that stream ends).
  *
  *   node server.js     (root: the render socket, ALSA, nftables)
  */
@@ -36,6 +43,7 @@ const consoleOut = require('./console_out.js');
 const { startControl } = require('./control.js');
 const carplay = require('./carplay_screen.js');
 const { Bus } = require('./mqtt_bus.js');
+const { CastTouch } = require('./touch.js');
 
 const HERE = __dirname;
 const STATE_DIR = process.env.CAST_STATE || '/var/opt/vizualyse-cast/state';
@@ -45,8 +53,21 @@ const INTERNET_UID = 12999;
 const IFNAME = 'wlan0';
 const FFMPEG = process.env.CAST_FFMPEG || path.join(HERE, 'ffmpeg');
 const PYTHON = '/var/opt/mgu-python/current/bin/python3';
-const LEASE = '/run/mgu-uplink/lease.json';
+const LEASE = process.env.CAST_LEASE || '/run/mgu-uplink/lease.json';
 const UPLINK_STATUS = '/run/mgu-uplink/status.json';
+/* the touch screen's touches: the reader (touch_reader.py on mgu-python)
+ * and the display's PDUs it copies; CAST_TOUCH_CMD: a stand-in, off the car */
+const TOUCH_PYTHON = process.env.CAST_PYTHON || PYTHON;
+const TOUCH_IFACE = process.env.CAST_TOUCH_IFACE || 'vlan73';
+const TOUCH_SRC = process.env.CAST_TOUCH_SRC || '160.48.199.115';
+const TOUCH_FILE = process.env.CAST_TOUCH_FILE || '';
+/* the touch screen only while parked: above this the car moves */
+const MAX_KMH = 3;
+/* The CarPlay preview (carplay_screen.previewArgs): a second ffmpeg output
+ * only where the touch screen can show it (mgu-render installed). It shares
+ * the cluster's ffmpeg, so CAST_CARPLAY_PREVIEW=0 leaves that ffmpeg exactly
+ * as before 0.4.0 should the preview ever trouble the cluster's stream. */
+const PREVIEW_ON = process.env.CAST_CARPLAY_PREVIEW !== '0';
 
 function even(n) { return Math.max(0, Math.round(n / 2) * 2); }
 /* cluster-render takes a video at most this wide a multiple of 4. */
@@ -276,7 +297,8 @@ function stopPlayer(why, keepPaused) {
     if (p.py) try { p.py.kill('SIGTERM'); } catch (e) { /* gone */ }
     releaseSpeakers(p);
     if (p.video) cr.drop(p.video);
-    if (o0(p).console) consoleVideo.stop();
+    if (o0(p).console) { consoleVideo.stop(); setImmediate(resumeTouch); }
+    if (p.opts.source === 'carplay') touch.previewEnd();
     log('play: stopped (' + why + ') after ' + p.frames + ' frames');
     last = { state: 'idle', note: why, url: p.opts.shown, output: p.opts.output, frames: p.frames };
     updateQr();
@@ -304,12 +326,17 @@ function play(opts) {
     if (o.w) o = Object.assign({}, o, { w: four(o.w), h: even(o.h) });
     const wantVideo = opts.output !== 'none';
     const isHttp = !cp && /^https?:/i.test(opts.url);
+    /* this screen: the touch screen gives way (one mgu-render client at a
+     * time); it comes back when the stream ends (resumeTouch) */
+    if (o.console && touch.shown()) touch.hide('a stream on this screen');
+    const preview = cp && PREVIEW_ON && touchAvailable;
 
     const args = ['-nostdin', '-hide_banner', '-loglevel', 'warning', '-threads', '3'];
     if (cp) {
         /* live: no -re; the hook connects to this listener */
         args.push.apply(args, carplay.inputArgs(carplay.state().port));
         args.push.apply(args, carplay.outputArgs(opts.output));
+        if (preview) args.push.apply(args, carplay.previewArgs());
     } else {
         if (opts.realtime) args.push('-re');
         if (isHttp) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
@@ -327,11 +354,20 @@ function play(opts) {
     }
 
     const env = Object.assign({}, process.env, { http_proxy: 'http://127.0.0.1:' + PROXY_PORT, https_proxy: 'http://127.0.0.1:' + PROXY_PORT });
-    const ff = spawn(FFMPEG, args, { env: env, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
+    /* fd 3: the sound; fd 4: the CarPlay preview */
+    const ff = spawn(FFMPEG, args, { env: env, stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] });
     const p = { ff: ff, py: null, opts: opts, video: null, started: Date.now(), frames: 0, lastErr: [] };
     player = p;
-    log('play: ' + opts.shown + ' on ' + opts.output + (opts.audio ? ' with audio at ' + opts.volume + '%' : ' without audio'));
+    log('play: ' + opts.shown + ' on ' + opts.output + (opts.audio ? ' with audio at ' + opts.volume + '%' : ' without audio') + (preview ? ', a preview for the touch screen' : ''));
     ff.on('error', (e) => { p.lastErr.push('ffmpeg: ' + e.message); log('ffmpeg: ' + e.message); });
+    /* the preview's pictures: always read (a full pipe would hold the
+     * cluster's output back too), kept only while the touch screen draws them */
+    if (preview) {
+        touch.previewStart();
+        ff.stdio[4].on('data', (d) => { if (player === p) touch.previewData(d); });
+    } else {
+        ff.stdio[4].resume();
+    }
 
     ff.stderr.on('data', (d) => {
         String(d).split('\n').filter((l) => l.trim()).forEach((l) => {
@@ -396,7 +432,8 @@ function play(opts) {
         if (p.py) try { p.py.stdin.end(); } catch (e) { /* gone */ }
         else releaseSpeakers(p);
         if (p.video) cr.drop(p.video);
-        if (o.console) consoleVideo.stop();
+        if (o.console) { consoleVideo.stop(); setImmediate(resumeTouch); }
+        if (cp) touch.previewEnd();
         last = { state: ok ? 'ended' : 'error', url: opts.shown, output: opts.output, frames: p.frames,
             error: ok ? null : (p.lastErr.slice(-3).join(' | ') || 'ffmpeg exited ' + (sig || code)) };
         /* The second screen has no end: the hook's connection went (it gives
@@ -420,12 +457,64 @@ function status() {
             frames: player.frames, seconds: Math.round((Date.now() - player.started) / 1000) }
         : last;
     const c = carplay.state();
+    touchAvailable = consoleOut.available();
     return Object.assign({ enabled: settings.enabled, uplink: up.state || 'unknown', render: cr.ready ? 'connected' : 'not connected', qr: qrWanted,
         link: link(), canReplay: !!lastPlay, bus: bus.state(),
+        /* the touch screen: up, wanted by the app (up, or waiting for a
+         * stream on this screen to end), possible here (mgu-render) */
+        touch: touch.shown(), touchWanted: touchWanted, touchAvailable: touchAvailable, moving: moving(), speed: car.kmh,
         source: player ? player.opts.source || 'url' : (lastPlay && lastPlay.source) || 'url',
         carplay: { armed: c.armed, ready: c.ready, why: c.why, mode: c.mode, streaming: c.streaming, frames: c.frames,
             display: c.display, wanted: c.wanted, size: c.size, switch: carplaySwitch(), cards: carplayCards(c), centre: carplayCentre(c), hudAlt: settings.carplayHudAlt },
         outputs: Object.keys(OUTPUTS).filter((k) => k !== 'console' || consoleOut.available()).map((k) => ({ id: k, title: OUTPUTS[k].title })) }, s);
+}
+
+/* The last status, for the touch screen: made once a second (the control
+ * socket's broadcast, or the touch screen's own tick) and after every
+ * action, so a frame never reads a file. */
+let lastStatus = null;
+function freshStatus() { lastStatus = status(); return lastStatus; }
+
+/* ---- the touch screen ---------------------------------------------------- */
+
+/* the car's speed, from the iDrive app (app/vehicle_speed) about once a
+ * second: moving true / false, or null when unknown (none for 10 s) */
+const car = { kmh: null, at: 0 };
+function moving() { return car.kmh === null || Date.now() - car.at > 10000 ? null : car.kmh > MAX_KMH; }
+
+let touchAvailable = consoleOut.available();
+/* the app's screen state is open: the touch screen is up, or waits for a
+ * stream on this screen to end */
+let touchWanted = false;
+const touch = new CastTouch({
+    dir: HERE, log: log, clientPath: consoleOut.CLIENT,
+    touch: { python: TOUCH_PYTHON, iface: TOUCH_IFACE, src: TOUCH_SRC, file: TOUCH_FILE,
+        cmd: process.env.CAST_TOUCH_CMD ? JSON.parse(process.env.CAST_TOUCH_CMD) : null },
+    state: () => lastStatus,
+    command: (c) => command(c),
+});
+touch.on('change', () => { freshStatus(); if (control) control.broadcast(); });
+/* the List corner: the app goes back to its iDrive list (the touch screen hides) */
+touch.on('list', () => { hideTouch('List'); if (control) { control.send({ ev: 'list' }); control.broadcast(); } });
+/* the seconds playing and what changed elsewhere, once a second */
+const touchTimer = setInterval(() => { if (touch.shown()) { freshStatus(); touch.refresh(); } }, 1000);
+
+function consoleUp() { return !!(player && player.opts.output === 'console'); }
+function showTouch() {
+    if (!touchAvailable) return 'the touch screen needs mgu-render';
+    if (moving() === true) return 'only while parked';
+    touchWanted = true;
+    if (consoleUp()) { log('touch: after the stream on this screen'); return null; }
+    freshStatus();
+    return touch.show();
+}
+function hideTouch(why) { touchWanted = false; touch.hide(why); }
+/* a stream on this screen ended: the touch screen again, if the app still wants it */
+function resumeTouch() {
+    if (!touchWanted || touch.shown() || consoleUp() || moving() === true || !touchAvailable || stopping) return;
+    log('touch: back after the stream on this screen');
+    freshStatus();
+    touch.show();
 }
 
 /* ---- the web page -------------------------------------------------------- */
@@ -620,6 +709,17 @@ function setEnabled(on) {
 }
 
 function command(c) {
+    if (c.cmd === 'speed') {
+        const kmh = Number(c.kmh);
+        if (!isFinite(kmh) || kmh < 0) return 'speed: a number of km/h';
+        car.kmh = kmh; car.at = Date.now();
+        if (moving() === true && (touch.shown() || touchWanted)) { log('touch: the car moves: hidden'); hideTouch('the car is moving'); }
+        return null;
+    }
+    if (c.cmd === 'touch') {
+        if (!c.on) { if (touch.shown() || touchWanted) hideTouch('the app hid it'); return null; }
+        return showTouch();
+    }
     if (c.cmd === 'enable') { setEnabled(true); return null; }
     if (c.cmd === 'disable') { setEnabled(false); return null; }
     if (c.cmd === 'hook111') return setCarplayMode(c.mode);
@@ -652,6 +752,8 @@ function shutdown(sig) {
     stopping = true;
     log('stopping (' + sig + ')');
     stopPlayer('shutting down');
+    clearInterval(touchTimer);
+    hideTouch('the tool stops');
     bus.close();
     consoleVideo.stop();
     try { log('firewall: removed ' + firewall.remove() + ' rule(s)'); } catch (e) { log('firewall: ' + e.message); }
@@ -680,7 +782,7 @@ startProxy();
 web.listen(PORT, '0.0.0.0', () => log('web: listening on port ' + PORT));
 /* speakers a previous run (or a head unit restart) left claimed: given back */
 speakers.recover();
-control = startControl({ app: 'vizualyse_cast', status: status, command: command, log: log });
+control = startControl({ app: 'vizualyse_cast', status: freshStatus, command: command, log: log });
 cr.connect();
 /* The address changes with the hotspot: keep the QR code current. hook111's
  * run directory can appear after this tool starts: keep its view current. */

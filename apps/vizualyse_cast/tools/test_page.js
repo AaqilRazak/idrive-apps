@@ -10,13 +10,19 @@
  *   node tools/test_page.js
  *
  * Covers: application.xml and uiDescription.json agree and the app binds
- * every button; with no tool the status says so; the CarPlay second screen
+ * every button, an empty screen state, the Vehicle2 speed in the manifest,
+ * ASCII texts; with no tool the status says so; entered with the tool
+ * there, the touch screen opens by itself (the empty screen state, then the
+ * tool's touch screen once it is visible); its List corner ({"ev":"list"})
+ * brings the page back; the Touch screen row opens it again; the car moving
+ * closes it to the page, the row off while moving; without mgu-render no
+ * touch screen (the row says so, the app stays on its list); the speed goes
+ * to the tool, also with the page hidden; the CarPlay second screen
  * switch is off without hook111 and sends hook111 alt / off; connected and idle, the
  * link is written and shown as a QR PNG (a new file per link, the old handle
  * released); Stop and Play last follow the tool's state and send stop and
  * replay; the console button hides without mgu-render; the QR toggle sends
- * the opposite of the tool's state; hiding the page closes the socket and
- * showing it again reconnects; the tool going away is shown.
+ * the opposite of the tool's state; the tool going away is shown.
  */
 const assert = require('assert');
 const EventEmitter = require('events');
@@ -41,6 +47,7 @@ const XML = fs.readFileSync(path.join(UI_DIR, 'application.xml'), 'utf8');
 const APP_JSON = JSON.parse(fs.readFileSync(path.join(PKG, 'rhmiData', 'application.json'), 'utf8'));
 const { startControl } = require(path.join(ROOT, '..', '..', 'native', 'vizualyse-cast', 'src', 'control.js'));
 
+const STATE = 'ST_OnlineApps_VizualyseCast', SCREEN = 'ST_OnlineApps_VizualyseCastScreen';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function until(what, check, ms) {
     const deadline = Date.now() + (ms || 3000);
@@ -83,6 +90,20 @@ const rhmi = new EventEmitter();
 rhmi.getByName = (n) => byName[n] || null;
 rhmi.mapEntryState = () => Promise.resolve();
 rhmi.openEntryState = () => Promise.resolve();
+/* openState: the main state goes, the state opened comes (as the HMI does) */
+const opened = [];
+rhmi.openState = (st) => {
+    opened.push(st);
+    setImmediate(() => { byName[STATE].emit('visible', { visible: false }); st.emit('visible', { visible: true }); });
+    return Promise.resolve();
+};
+/* closeState: the state goes, the main state comes */
+const closed = [];
+rhmi.closeState = (st) => {
+    closed.push(st);
+    setImmediate(() => { st.emit('visible', { visible: false }); byName[STATE].emit('visible', { visible: true }); });
+    return Promise.resolve();
+};
 rhmi.getResourceBundle = () => bundle;
 rhmi.flush = () => Promise.resolve();
 
@@ -93,6 +114,7 @@ const logger = {};
 class OnlineApp extends EventEmitter {
     constructor() {
         super();
+        OnlineApp.last = this;
         this._packageJson = JSON.parse(fs.readFileSync(path.join(PKG, 'package.json'), 'utf8'));
         this.appDescription = APP_JSON;
         this.rhmiApplication = rhmi;
@@ -114,10 +136,20 @@ class OnlineApp extends EventEmitter {
     unregisterHmiVisible() { return Promise.resolve(); }
     destroyBundles() { return Promise.resolve(); }
 }
+/* Vehicle2's speed, raw (km/h x 64; 65535 invalid) */
+let speedRaw = 65535;
+const someipBuilders = {
+    buildTypedProxy(iface, instance) {
+        assert.strictEqual(iface, 'de.bmw.infotainment.vehicle.Vehicle2', 'the app reads the speed only');
+        assert.strictEqual(instance, '1');
+        return Promise.resolve({ init: () => Promise.resolve(), statusCarSpeed2: { getValue: () => Promise.resolve({ speedVehicleCentreOfGravity: speedRaw }) } });
+    },
+};
 function runSource() {
     const Module = require('module');
     const load = Module._load;
-    const FAKES = { 'oap-sdk/src/core/OnlineApp.js': OnlineApp, 'oap-sdk/src/logging/logging': { getSDKLogger: () => logger } };
+    const FAKES = { 'oap-sdk/src/core/OnlineApp.js': OnlineApp, 'oap-sdk/src/logging/logging': { getSDKLogger: () => logger },
+        'oap-sdk/src/someip/someipBuilders': someipBuilders };
     Module._load = function (req, parent, isMain) { return FAKES[req] || load.call(this, req, parent, isMain); };
     require(path.join(ROOT, MANIFEST.modules[0]));
 }
@@ -126,34 +158,69 @@ function runSource() {
 const LINK1 = 'http://172.20.10.2:8480/?t=0123456789abcdef';
 const LINK2 = 'http://172.20.10.3:8480/?t=0123456789abcdef';
 const OUTPUTS = [{ id: 'map' }, { id: 'hud' }, { id: 'console' }, { id: 'none' }];
-let st = { state: 'idle', uplink: 'online', render: 'connected', qr: true, link: LINK1, canReplay: false, outputs: OUTPUTS };
+let st = { state: 'idle', uplink: 'online', render: 'connected', qr: true, link: LINK1, canReplay: false, outputs: OUTPUTS,
+    touch: false, touchWanted: false, touchAvailable: true, moving: null, speed: null };
 const received = [];
 let control = null;
 function serve() {
-    control = startControl({ app: 'vizualyse_cast', status: () => st, command: (c) => { received.push(c); return null; }, log: () => {} });
+    control = startControl({ app: 'vizualyse_cast', status: () => st, command: (c) => {
+        received.push(c);
+        if (c.cmd === 'touch') st = Object.assign({}, st, { touch: !!c.on && st.moving !== true, touchWanted: !!c.on });
+        return null;
+    }, log: () => {} });
 }
+const count = (cmd, f) => received.filter((c) => c.cmd === cmd && (!f || f(c))).length;
+const press = async (name) => { await sleep(450); byName[name].emit('action'); };
 
 async function main() {
-    const comps = UI.containers['1'].components;
+    const comps = UI.containers['1'].components, scr = UI.containers['2'];
+    assert.strictEqual(UI.containers['1'].name, STATE);
+    assert.strictEqual(scr.name, SCREEN);
     const xmlIds = (XML.match(/<component id="(\d+)"/g) || []).map((m) => m.match(/\d+/)[0]).sort();
-    assert.deepStrictEqual(Object.keys(comps).sort(), xmlIds, 'application.xml and uiDescription.json list the same components');
+    assert.deepStrictEqual(Object.keys(comps).concat(Object.keys(scr.components)).sort(), xmlIds, 'application.xml and uiDescription.json list the same components');
+    assert(Object.keys(scr.components).every((id) => scr.components[id].type !== 'button' &&
+        !(scr.components[id].properties.Focusable && scr.components[id].properties.Focusable.value)), 'the screen state has nothing to press');
+    assert(/<container id="2" type="state" widget="LT_State_Wide">\r?\n {8}<property id="9" value="1"\/>/.test(XML), 'the screen state\'s parent is the main state');
+    assert(!/[^\x00-\x7f]/.test(JSON.stringify(UI)), 'uiDescription.json is ASCII');
+    const manifest = JSON.parse(fs.readFileSync(path.join(PKG, 'manifest.json'), 'utf8'));
+    const v2 = manifest.proxies['de.bmw.infotainment.vehicle.Vehicle2'];
+    assert(v2 && v2.instances[0] === '1' && v2.attributes.statusCarSpeed2 === 'rs', 'the manifest asks to read and subscribe Vehicle2.statusCarSpeed2');
+    assert(MANIFEST.sdk.indexOf('oap-sdk/src/someip/someipBuilders') >= 0, 'the SOME/IP builders linked');
     assert.strictEqual(comps['21'].name, 'castQr');
     assert(/<component id="21" type="label" widget="LT_Label_1Graphic_Scalable">/.test(XML), 'the QR is a scalable graphic label');
     const buttons = Object.keys(comps).filter((id) => comps[id].type === 'button').map((id) => comps[id].name).sort();
     assert.deepStrictEqual(buttons, ['castCarplayCentre', 'castCarplayDirections', 'castCarplayEta', 'castCarplayHud', 'castCarplayHudAlt', 'castCarplayMap', 'castCarplayOn', 'castCarplayZoomIn', 'castCarplayZoomOut',
-        'castConsole', 'castEnable', 'castHud', 'castMap', 'castQrToggle', 'castStop']);
-    console.log('ok   page: 15 buttons, a QR graphic, xml and uiDescription agree');
+        'castConsole', 'castEnable', 'castHud', 'castMap', 'castQrToggle', 'castStop', 'castTouch']);
+    assert.strictEqual(UI.containers['1'].components['46'].name, 'castTouch');
+    console.log('ok   page: 16 buttons (Touch screen first), a QR graphic, an empty screen state, the speed in the manifest, ASCII, xml and uiDescription agree');
 
     process.exit = (code) => { throw new Error('process.exit(' + code + ')'); };
     runSource();
+    /* the HMI shows the entry state */
+    setTimeout(() => byName[STATE].emit('visible', { visible: true }), 50);
     const S = byName.castStatus;
     await until('no-tool status', () => /not running/.test(S.text || ''));
     assert(!logs.some((l) => /^error/.test(l)), logs.filter((l) => /^error/.test(l)).join('\n'));
     assert.strictEqual(byName.castStop.enabled, false);
+    assert.strictEqual(byName.castTouch.enabled, false);
     console.log('ok   without the tool: "' + S.text + '", buttons disabled');
 
+    /* entered with the tool there: the touch screen by itself; its List corner: the page */
     serve();
+    await until('the screen state opened by itself', () => opened.length === 1 && opened[0] === byName[SCREEN]);
+    await until('the touch screen asked for', () => count('touch', (c) => c.on === true) === 1);
+    await until('the page says so', () => /^The touch screen is up/.test(S.text || ''));
+    st = Object.assign({}, st, { touch: false, touchWanted: false });
+    control.send({ ev: 'list' });
+    control.broadcast();
+    await until('the page back on List', () => closed.length === 1 && closed[0] === byName[SCREEN]);
+    await sleep(600);
+    assert.strictEqual(opened.length, 1, 'the touch screen does not come back by itself after List');
+    console.log('ok   entered: the touch screen opens by itself (the screen state, then the tool\'s); its List corner closes it to the page');
+
     await until('ready status', () => /^Ready/.test(S.text || ''));
+    assert.strictEqual(byName.castTouch.text, 'Touch screen');
+    assert.strictEqual(byName.castTouch.enabled, true, 'Touch screen on (speed unknown: the tool decides)');
     assert.strictEqual(byName.castLink.text, LINK1);
     await until('QR graphic', () => byName.castQr.graphic);
     const qr1 = byName.castQr.graphic.value;
@@ -286,13 +353,54 @@ async function main() {
     assert.strictEqual(byName.castLink.text, LINK2);
     console.log('ok   a new link: new QR file, the old handle released and its file removed');
 
-    byName.ST_OnlineApps_VizualyseCast.emit('visible', { visible: false });
-    await until('closed on hide', () => /not running/.test(S.text || ''));
-    const n = received.length;
-    byName.ST_OnlineApps_VizualyseCast.emit('visible', { visible: true });
-    await until('reconnected on show', () => /^Playing/.test(S.text || ''));
-    assert.strictEqual(received.length, n, 'showing the page sends nothing');
-    console.log('ok   hiding the page closes the socket, showing it reconnects');
+    /* Touch screen: the screen state, then the touch screen */
+    await press('castTouch');
+    await until('the screen state opened', () => opened.length === 2 && opened[1] === byName[SCREEN]);
+    await until('touch on sent once it is visible', () => count('touch', (c) => c.on === true) === 2);
+    /* BACK: the page, the touch screen hidden */
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('touch off on BACK', () => count('touch', (c) => c.on === false) === 1, 1500);
+    console.log('ok   the Touch screen row opens the screen state, then the touch screen; BACK hides it');
+
+    /* the car moving: the page back (the tool hides its picture itself); the row off */
+    await press('castTouch');
+    await until('the screen state for the move', () => opened.length === 3);
+    await until('shown for the move', () => st.touch);
+    st = Object.assign({}, st, { moving: true, speed: 30, touch: false, touchWanted: false });
+    control.broadcast();
+    await until('the page back when the car moves', () => closed.length === 2);
+    await until('moving: Touch screen off', () => byName.castTouch.enabled === false && byName.castTouch.text === 'Touch screen (only while parked)');
+    assert.strictEqual(byName.castStop.enabled, true, 'the list keeps working while driving');
+    console.log('ok   the car moving closes the touch screen to the page; moving: the row off, the rest on');
+
+    /* the speed: to the tool once the car gives one, with the page hidden too */
+    assert(!received.some((c) => c.cmd === 'speed'), 'no speed sent while the car gives none (65535)');
+    speedRaw = 48 * 64;
+    await until('speed 48 sent', () => received.some((c) => c.cmd === 'speed' && c.kmh === 48), 3000);
+    byName[STATE].emit('visible', { visible: false });
+    const n = count('speed');
+    await sleep(1300);
+    assert(count('speed') > n, 'the speed goes on with the page hidden');
+    assert(/^Playing/.test(S.text || ''), 'the socket kept with the page hidden');
+    byName[STATE].emit('visible', { visible: true });
+    st = Object.assign({}, st, { moving: false, speed: 0 });
+    speedRaw = 0;
+    control.broadcast();
+    await until('parked: Touch screen on', () => byName.castTouch.enabled === true && byName.castTouch.text === 'Touch screen');
+    console.log('ok   the speed goes to the tool, with the page hidden too; parked again: the row on');
+
+    /* without mgu-render: no touch screen, the app stays on its list */
+    st = Object.assign({}, st, { touchAvailable: false });
+    control.broadcast();
+    await until('the row says why', () => byName.castTouch.enabled === false && byName.castTouch.text === 'Touch screen (needs mgu-render)');
+    const o = opened.length;
+    /* the tile again: entered, but no touch screen here */
+    OnlineApp.last.emit('entryPointExecute', APP_JSON.application.entryPoints[0].uuid);
+    await sleep(600);
+    assert.strictEqual(opened.length, o, 'entered: the list stays');
+    assert.strictEqual(count('touch', (c) => c.on === true), 3, 'the touch screen not asked for');
+    console.log('ok   without mgu-render: "' + byName.castTouch.text + '", the app stays on its list');
 
     control.close();
     await until('tool gone', () => /not running/.test(S.text || ''));

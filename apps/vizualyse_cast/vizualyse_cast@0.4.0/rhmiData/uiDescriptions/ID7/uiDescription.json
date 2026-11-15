@@ -39,7 +39,7 @@
           "rows": [
             {
               "Text": {
-                "value": "Connecting…",
+                "value": "Connecting...",
                 "type": "Text"
               }
             }
@@ -453,6 +453,74 @@
             {
               "Text": {
                 "value": "CarPlay map: zoom out",
+                "type": "Text"
+              }
+            }
+          ]
+        },
+        "46": {
+          "type": "button",
+          "name": "castTouch",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "Touch screen",
+                "type": "Text"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "2": {
+      "type": "state",
+      "name": "ST_OnlineApps_VizualyseCastScreen",
+      "components": {
+        "50": {
+          "type": "title",
+          "name": "castScreenTitle",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "SID_CAST_TITLE",
+                "type": "StringId"
+              }
+            }
+          ]
+        },
+        "51": {
+          "type": "label",
+          "name": "castScreenNote",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 0,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "The touch screen is up. List (top right) or Back shows the list.",
                 "type": "Text"
               }
             }

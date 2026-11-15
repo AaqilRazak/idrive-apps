@@ -8,9 +8,11 @@
  * after each command and once a second. Commands: {"cmd":"stop"},
  * {"cmd":"replay","output":...}, {"cmd":"carplay","output":"map"|"hud"} (the
  * CarPlay second screen), {"cmd":"hook111","mode":"off"|"alt"} (the second
- * screen's switch: hook111's mode), {"cmd":"enable"}, {"cmd":"disable"} and
- * {"cmd":"qr","show":bool}; anything else, or a command that can't run, is
- * answered with {"ev":"error","error":...}.
+ * screen's switch: hook111's mode), {"cmd":"enable"}, {"cmd":"disable"},
+ * {"cmd":"qr","show":bool}, {"cmd":"touch","on":bool} (the touch screen) and
+ * {"cmd":"speed","kmh":...} (the car's speed, from the app); anything else,
+ * or a command that can't run, is answered with {"ev":"error","error":...}.
+ * The touch screen's List corner sends {"ev":"list"} (back to the list).
  */
 'use strict';
 
@@ -111,6 +113,8 @@ function startControl(opts) {
 
     return {
         broadcast: broadcast,
+        /* an event to every client (the touch screen's List corner: {"ev":"list"}) */
+        send: (obj) => clients.forEach((s) => send(s, obj)),
         close() {
             clearInterval(timer);
             clearInterval(recheck);

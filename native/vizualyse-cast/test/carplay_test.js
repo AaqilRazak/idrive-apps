@@ -233,10 +233,43 @@ async function throughFfmpeg(cp, target, stream, port, look) {
     return { frames: bytes / size, whole: bytes % size === 0, code: code, err: err.trim(), y: y };
 }
 
+/* the same with the touch screen's preview as a second output (fd 4): the
+ * cluster's output as without it */
+async function withPreview(cp, target, stream, port) {
+    const T = cp.TARGETS[target], size = T.w * T.h * 3 / 2, P = cp.PREVIEW, psize = P.w * P.h * 4;
+    const ff = spawn(FFMPEG, ['-nostdin', '-hide_banner', '-loglevel', 'error'].concat(cp.inputArgs(port), cp.outputArgs(target), cp.previewArgs()),
+        { stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] });
+    let bytes = 0, pbytes = 0, err = '', firstAt = 0, pfirstAt = 0, opaque = true;
+    ff.stdout.on('data', (b) => { bytes += b.length; if (!firstAt && bytes >= size) firstAt = Date.now(); });
+    ff.stdio[4].on('data', (b) => {
+        /* every 4th byte (alpha) 255 */
+        for (let i = (4 - (pbytes % 4)) % 4 + 3; i < b.length; i += 4) if (b[i] !== 255) { opaque = false; break; }
+        pbytes += b.length;
+        if (!pfirstAt && pbytes >= psize) pfirstAt = Date.now();
+    });
+    ff.stderr.on('data', (b) => { err += b; });
+    ff.stdio[3].resume();
+    const sock = await connectWhenListening(port, 50);
+    const t1 = Date.now();
+    sock.end(fs.readFileSync(stream));
+    const code = await new Promise((r) => ff.on('exit', r));
+    return { frames: bytes / size, whole: bytes % size === 0, pictures: pbytes / psize, pwhole: pbytes % psize === 0, code: code, err: err.trim(),
+        first: firstAt - t1, pfirst: pfirstAt - t1, opaque: opaque };
+}
+
 async function streams(cp) {
     const cluster = makeStream(984, 480, 3), wide = makeStream(1088, 480, 3), hudSize = makeStream(1056, 384, 3);
     let r = await throughFfmpeg(cp, 'map', cluster, 46201);
     ok('map: a 984x480 stream -> ' + r.frames + ' whole 984x480 frames (as drawn, no scaling), ffmpeg clean', r.whole && r.frames >= 30 && r.code === 0 && !r.err);
+    const pa = cp.previewArgs().join(' ');
+    ok('preview: RGBA ' + cp.PREVIEW.w + 'x' + cp.PREVIEW.h + ' at ' + cp.PREVIEW.fps + ' fps on fd 4, the rate cut before scaling, fitted not squeezed',
+        /-vf fps=4,scale=760:370:force_original_aspect_ratio=decrease/.test(pa) && /pad=760:370/.test(pa) && /format=rgba -f rawvideo pipe:4$/.test(pa));
+    const p = await withPreview(cp, 'map', cluster, 46211);
+    ok('map with the preview: the same ' + p.frames + ' whole cluster frames (' + r.frames + ' without), the first in ' + p.first + ' ms; ' +
+        p.pictures + ' whole opaque preview pictures, the first in ' + p.pfirst + ' ms; ffmpeg clean',
+        p.whole && p.frames === r.frames && p.pwhole && p.pictures >= 8 && p.opaque && p.code === 0 && !p.err);
+    const ph = await withPreview(cp, 'hud', hudSize, 46212);
+    ok('hud (1056x384) with the preview: ' + ph.frames + ' whole HUD frames, ' + ph.pictures + ' preview pictures', ph.whole && ph.frames >= 40 && ph.pwhole && ph.pictures >= 8 && ph.code === 0 && !ph.err);
     r = await throughFfmpeg(cp, 'map', wide, 46204);
     ok('map while the phone is still on 1088x480: scaled to fit (' + r.frames + ' frames)', r.whole && r.frames >= 30 && r.code === 0);
     r = await throughFfmpeg(cp, 'hud', cluster, 46209);

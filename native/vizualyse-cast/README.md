@@ -15,6 +15,58 @@ the instrument cluster or the HUD, with its sound through the speakers.
 **Cast to cluster: on / off** on the iDrive page turns the whole service off
 (nothing plays, no QR code, the phone page closed) and is kept across restarts.
 
+## The touch screen
+
+Since 0.4.0 the iDrive app opens on this tool's **touch screen**, built
+from the platform's touch kit (`tool/touch_ui`, shared by every app's
+touch screen), in mgu-render's app area (1790x638 at +108+82: the HMI's
+title bar and back strip stay the HMI's). The app opens its empty screen
+state, then `{"cmd":"touch","on":true}`; BACK, HOME, another app or a
+pop-up make it send `on: false`. The **List** button (top right) hides it
+and sends the app `{"ev":"list"}`: the app goes back to its iDrive list,
+which keeps every control.
+
+- **Only where mgu-render is installed**: the tool doesn't require it (this
+  screen's output is optional); `touchAvailable` in the status says whether
+  its client is on the unit, and without it the app stays on its list.
+- **Only while parked**: the app sends the car's speed once a second
+  (`{"cmd":"speed","kmh":N}`); above 3 km/h the touch screen hides and
+  `touch` is refused (`only while parked`). Cast is used while driving: the
+  list does it all then.
+- **A stream on this screen** (the media console output) uses mgu-render
+  under the same client name: the touch screen hides first, and comes back
+  when that stream ends if the app still wants it (`touchWanted`).
+- **The screen** (`src/touch_view.js`, pure): three tabs in the kit's frame.
+  *Cast*: the phone page's QR code (drawn by the kit's `qr` widget from the
+  platform's `common/qrcode`, made once per link) and link; the stream's
+  card (what plays, where, for how long) with **Stop**; **Play the last
+  stream again on** Cluster map / HUD / This screen; **Cast to cluster** and
+  **QR code on the cluster**. *CarPlay*: a live preview of the CarPlay map
+  (below), **Map on Cluster / Map on HUD**, zoom − / +, and the five
+  switches (second screen, directions card, time and distance card, centre
+  the map, HUD alternate mode). *Info*: the uplink, the phone page, the
+  cluster renderer, hook111, the last stream, the speed (mph). The status
+  line says what plays and the hotspot's address. Every action is the same
+  command the iDrive list sends.
+- **Its model comes from memory**: the last status, made once a second (the
+  socket's broadcast or the touch screen's tick) and after every action; a
+  frame never reads a file.
+- **The CarPlay preview**: while the CarPlay map plays, its ffmpeg has a
+  second, small output (`carplay_screen.previewArgs`): 760x370 RGBA, 4
+  pictures a second, on fd 4, the rate cut before scaling, the phone's
+  picture fitted (black either side). The tool reads fd 4 all the time
+  (a full pipe would hold the cluster's output back too) and keeps the
+  pictures only while the touch screen shows its CarPlay tab, into two
+  buffers made once; a picture redraws the preview's rectangle alone (Node 8
+  on one desktop core: ~3 ms). Off the car the cluster's output is the same
+  with and without it (`test/carplay_test.js`). It is only added where the
+  touch screen can show it (mgu-render installed); `CAST_CARPLAY_PREVIEW=0`
+  in the service's environment leaves the CarPlay ffmpeg as before 0.4.0.
+  "Not playing" (and why) when there is no picture.
+- **Touch** (`touch_reader.py`, mgu-python, from the kit): read passively,
+  never claimed; targets are 64 px or more (`test/touch_test.js` lints every
+  tab in every state).
+
 ## The CarPlay second screen
 
 CarPlay's own instrument-cluster view (Google Maps' or Apple Maps' cluster
@@ -111,8 +163,10 @@ live one) or from its start. The Browser asks the same while in game mode.
 | `pcm_play.py` | root, mgu-python | plays the audio into SmartXbar's `CarPlayMain_CF_48_STEREO` source; makes the stream's lock as the system does first (since 0.3.9, the platform's player: before, a lock first made by root could silence CarPlay until a restart) |
 | `console_out.js` | root | the media console output: frames into mgu-render's frame file `/dev/shm/mgu-video-vizualyse_cast` (MGVF, 3 slots), drawn by an mgu-render client in layer mode in the screen's app area |
 | `firewall.js` | root | one in-memory nftables rule letting the phone reach port 8480 on `wlan0`; added at start (while on), removed at stop, when turned off and by the tool's `deactivate` |
-| `control.js` | root | the iDrive app's socket, `/dev/shm/vizualyse-cast/ctl.sock`, mode 0660 in the Cast app's own group (found by its package name under `/var/opt/public/oap`; root only until it is installed; every Store app shares `tm_oap_app`, so that group was open to all of them before 0.3.8): status, stop, replay, carplay, hook111, carplayCards, carplayZoom, carplayCentre, carplayHudAlt, enable, disable, the cluster QR code |
-| `carplay_screen.js` | root | the CarPlay second screen: hook111's state, the size and the cluster view to ask for, ffmpeg's arguments |
+| `control.js` | root | the iDrive app's socket, `/dev/shm/vizualyse-cast/ctl.sock`, mode 0660 in the Cast app's own group (found by its package name under `/var/opt/public/oap`; root only until it is installed; every Store app shares `tm_oap_app`, so that group was open to all of them before 0.3.8): status, stop, replay, carplay, hook111, carplayCards, carplayZoom, carplayCentre, carplayHudAlt, enable, disable, the cluster QR code, touch, speed; `{"ev":"list"}` to the app |
+| `carplay_screen.js` | root | the CarPlay second screen: hook111's state, the size and the cluster view to ask for, ffmpeg's arguments (the preview's too) |
+| `touch.js`, `touch_view.js` | root | the touch screen (above): its model from the last status, the QR code, the CarPlay preview's pictures, its actions; its three tabs as the kit's widgets |
+| `ui_*.js`, `ui.*`, `touch_reader.py` | root (the reader: mgu-python, then `nobody`) | copies of the platform's touch kit (`tool/touch_ui`; synced, not committed) |
 
 Frame sizes keep within cluster-render's 5500 KB/s upload ceiling: for a
 stream URL 512x288 at 15 fps on the map and 480x270 at 15 fps on the HUD,
@@ -128,7 +182,13 @@ decodes in software on the Atom A3960's four cores.
 
 `test/carplay_test.js` (Node 8, the kit's ffmpeg) checks the second-screen
 source off the car: a fake hook111, a real x264 stream through the tool's
-ffmpeg arguments, and server.js end to end.
+ffmpeg arguments (with the touch screen's preview output too), and
+server.js end to end. `test/touch_test.js` (Node 8) checks the touch screen:
+every tab in every state lint clean, PNGs of the tabs, the preview's
+buffers, and server.js end to end against a fake mgu-render client and
+touch reader (`test/fake_*.js`): shown, a toggle, moving, List, a stream on
+this screen and back, the CarPlay map's live preview (with ffmpeg:
+`CAST_FFMPEG=...`; the end-to-end part on Linux).
 
 Sound reaches the speakers while the audio manager has `CarPlayMain`
 connected (CarPlay the source, or nothing else playing); the first play

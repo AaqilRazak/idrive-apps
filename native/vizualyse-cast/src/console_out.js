@@ -13,7 +13,9 @@
 
 const fs = require('fs');
 
-const CLIENT = '/var/opt/mgu-render/current/mgu_render_client.js';
+/* mgu-render's client (CAST_RENDER_CLIENT: a stand-in, off the car); the
+ * touch screen uses it too, one client at a time (server.js) */
+const CLIENT = process.env.CAST_RENDER_CLIENT || '/var/opt/mgu-render/current/mgu_render_client.js';
 const NAME = 'vizualyse_cast';
 const FILE = '/dev/shm/mgu-video-' + NAME;
 const MAGIC = 0x4656474d, NSLOT = 3, HEADER = 64;
@@ -106,4 +108,4 @@ class ConsoleVideo {
     }
 }
 
-module.exports = { ConsoleVideo, available };
+module.exports = { ConsoleVideo, available, CLIENT, NAME };

@@ -5,7 +5,17 @@
  * stream URL from the phone on the instrument cluster, the HUD or this
  * screen (the media console), with its sound through the speakers.
  *
- * One LT_State_Wide page: the status; the phone page's link as a QR code
+ * The touch screen first: entered, the app opens its empty screen state and
+ * the tool's touch screen goes over it (the same controls by touch: Cast,
+ * CarPlay and Info tabs); its List corner, BACK or the car moving bring
+ * this page back (platform app/touch_mode). Only where the tool can draw it
+ * (mgu-render installed: the tool's touchAvailable) and only while parked:
+ * the app reads the car's speed once a second (vehicle_speed.js) and hands
+ * it to the tool, which hides the touch screen above 3 km/h. Cast is used
+ * while driving: this page keeps every control.
+ *
+ * One LT_State_Wide page: the status; Touch screen (the touch screen
+ * again); the phone page's link as a QR code
  * (LT_Label_1Graphic_Scalable, a PNG in /dev/shm the HMI can read) and as
  * text; Cast to cluster on or off; Stop; the CarPlay second screen on or
  * off (hook111's mode, now and for later starts); its cluster view (map and
@@ -14,8 +24,9 @@
  * Play last on the cluster map / the HUD / this screen, which replay the
  * last stream the phone started (its URL stays in the tool); and the QR code
  * on the cluster on or off. The app holds the tool's control
- * socket while its page is visible (cast_control.js); the tool keeps
- * running without it. The structure follows robertn_waze_cluster.
+ * socket while it runs (cast_control.js: the speed goes on with the page
+ * hidden); the tool keeps running without it. The structure follows
+ * robertn_waze_cluster and vizualyse_cluster.
  */
 'use strict';
 
@@ -25,12 +36,15 @@ const OnlineApp = require('oap-sdk/src/core/OnlineApp.js');
 const logging = require('oap-sdk/src/logging/logging');
 const { CastControl } = require('./cast_control.js');
 const { qrPng } = require('./qr_png.js');
+const { TouchMode } = require('./touch_mode.js');
+const { watchSpeed } = require('./vehicle_speed.js');
 
 const logger = logging.getSDKLogger();
 
 const STATE_NAME = 'ST_OnlineApps_VizualyseCast';
+const SCREEN_NAME = 'ST_OnlineApps_VizualyseCastScreen';
 const N = {
-    status: 'castStatus', qr: 'castQr', link: 'castLink', hint: 'castHint', stop: 'castStop',
+    status: 'castStatus', touch: 'castTouch', qr: 'castQr', link: 'castLink', hint: 'castHint', stop: 'castStop',
     map: 'castMap', hud: 'castHud', console: 'castConsole', qrToggle: 'castQrToggle', info: 'castInfo',
     enable: 'castEnable', carplayOn: 'castCarplayOn', carplayDirections: 'castCarplayDirections', carplayEta: 'castCarplayEta', carplayZoomIn: 'castCarplayZoomIn', carplayZoomOut: 'castCarplayZoomOut', carplayCentre: 'castCarplayCentre', carplayHudAlt: 'castCarplayHudAlt', carplayMap: 'castCarplayMap', carplayHud: 'castCarplayHud',
 };
@@ -48,7 +62,7 @@ function qrDir() {
 
 function oneRow(line) {
     const flat = String(line || '').replace(/\s+/g, ' ');
-    return flat.length > ROW_CHARS ? flat.slice(0, ROW_CHARS - 1) + '…' : flat;
+    return flat.length > ROW_CHARS ? flat.slice(0, ROW_CHARS - 3) + '...' : flat;
 }
 
 /* RHMI event values arrive as booleans, or as 1/0 on some HMIs. */
@@ -60,6 +74,9 @@ class CastApp extends OnlineApp {
     constructor() {
         super();
         this._state = null;
+        this._screen = null;
+        this._touch = null;
+        this._stopSpeed = null;
         this._components = {};
         this._actionById = {};
         this._lastPress = {};
@@ -69,7 +86,8 @@ class CastApp extends OnlineApp {
         this._shutdownPromise = null;
         this._qr = { key: null, file: null, chain: Promise.resolve() };
         this._control = new CastControl({ log: logger });
-        this._control.on('change', () => this._render());
+        this._control.on('change', () => { if (this._touch) this._touch.sync(); this._render(); });
+        this._control.on('list', () => { if (this._touch) this._touch.list(); });
 
         this.on('initialized', () => {
             this._appInitialized()
@@ -90,6 +108,9 @@ class CastApp extends OnlineApp {
             return this.initialized();
         }
         const foregroundStart = this._startedForeground();
+        /* the tool hears from the app while it runs: the speed, whatever the page */
+        this._control.open();
+        this._startSpeed();
         return this._setupRhmi()
             .then(() => this._registerEntryPoints())
             .then(() => {
@@ -100,10 +121,20 @@ class CastApp extends OnlineApp {
                 if (foregroundStart) {
                     this._sawForeground = true;
                     this._setVisible(true);
+                    this._touch.entered();
                 }
                 const lastUuid = this.getLastExecutedEntryPointUuid && this.getLastExecutedEntryPointUuid();
                 return lastUuid ? this._onEntryPointExecute(lastUuid) : undefined;
             });
+    }
+
+    _startSpeed() {
+        let builders = null;
+        try { builders = require('oap-sdk/src/someip/someipBuilders'); } catch (err) {
+            logger.warn('speed: no SOME/IP in this SDK (' + (err && err.message) + '): the tool cannot tell parked from driving');
+            return;
+        }
+        this._stopSpeed = watchSpeed(builders, logger, (kmh) => this._control.speed(kmh));
     }
 
     _startedForeground() {
@@ -123,6 +154,15 @@ class CastApp extends OnlineApp {
         const missing = names.filter((name) => !this._components[name]);
         if (missing.length) return Promise.reject(new Error('uiDescription lacks ' + missing.join(', ')));
 
+        this._screen = rhmi.getByName(SCREEN_NAME);
+        if (!this._screen) logger.warn('uiDescription has no ' + SCREEN_NAME + ': the touch screen goes over the main page');
+        const c = this._control;
+        /* the touch screen only where the tool can draw it (mgu-render) */
+        this._touch = new TouchMode({ rhmi: rhmi, page: this._state, screen: this._screen, log: logger,
+            tool: { connected: () => c.connected() && c.touchAvailable(), moving: () => c.moving(), shown: () => c.touchShown(),
+                show: () => c.showTouch(), hide: () => c.hideTouch() },
+            visible: (v) => this._setVisible(v) });
+        this._bind(N.touch, () => this._touch.open());
         this._bind(N.stop, () => this._control.stop());
         this._bind(N.enable, () => (this._control.enabled() ? this._control.disable() : this._control.enable()));
         this._bind(N.carplayOn, () => this._control.setCarplayOn(!this._control.carplaySwitch().on));
@@ -158,11 +198,7 @@ class CastApp extends OnlineApp {
             this._qr.key = null;
             this._render();
         });
-        this._state.on('visible', (event) => {
-            const visible = isTrue(event && event.visible);
-            if (visible) this._sawForeground = true;
-            this._setVisible(visible);
-        });
+        this._state.on('visible', (event) => { if (isTrue(event && event.visible)) this._sawForeground = true; });
         return Promise.resolve(this._state.updateResources()).then(() => {
             logger.info('page ready: ' + names.length + ' components found');
             this._render();
@@ -210,6 +246,7 @@ class CastApp extends OnlineApp {
         if (this._shutdownPromise || !this.rhmiApplication || !uuid) return Promise.resolve();
         this._sawForeground = true;
         this._setVisible(true);
+        if (this._touch) this._touch.entered();
         return Promise.resolve(this.rhmiApplication.openEntryState(uuid))
             .catch((err) => logger.warn('openEntryState failed: ' + (err && err.message)));
     }
@@ -218,10 +255,10 @@ class CastApp extends OnlineApp {
     _setVisible(visible) {
         if (this._shutdownPromise || this._visible === visible) return;
         this._visible = visible;
-        logger.info('page ' + (visible ? 'visible' : 'hidden'));
+        logger.info('app ' + (visible ? 'visible' : 'hidden'));
+        /* off our pages the touch screen must not cover whatever the HMI shows */
+        if (!visible && this._control.hideTouch()) logger.info('app left: touch screen hidden');
         this._reportVisibilityStatus(visible);
-        if (visible) this._control.open();
-        else this._control.close();
     }
 
     _reportVisibilityStatus(visible) {
@@ -263,31 +300,36 @@ class CastApp extends OnlineApp {
     _render() {
         if (!this._state || this._shutdownPromise) return;
         const c = this._control, up = c.connected(), on = up && c.enabled(), link = on ? c.link() : '';
+        /* while the touch screen covers this page itself, nothing under it can be pressed */
+        const covered = this._touch ? this._touch.covered() : c.touchShown();
+        const en = (name, v) => this._setEnabled(name, v && !covered);
         this._write(N.status, c.statusText());
+        this._write(N.touch, !up || c.touchAvailable() ? (c.moving() ? 'Touch screen (only while parked)' : 'Touch screen') : 'Touch screen (needs mgu-render)');
+        this._setEnabled(N.touch, up && c.touchAvailable() && !c.moving() && !covered);
         this._write(N.link, link ? link : '');
         this._write(N.hint, link ? 'Scan with the phone whose hotspot the car is on, or open the link' : '');
         this._write(N.info, c.infoText());
         this._write(N.qrToggle, 'QR code on the cluster: ' + (c.qrOnCluster() ? 'on' : 'off'));
         this._write(N.enable, 'Cast to cluster: ' + (up ? (c.enabled() ? 'on' : 'off') : 'not running'));
-        this._setEnabled(N.enable, up);
-        this._setEnabled(N.stop, on && c.playing());
+        en(N.enable, up);
+        en(N.stop, on && c.playing());
         this._write(N.carplayOn, c.switchText());
-        this._setEnabled(N.carplayOn, up && c.carplaySwitch().installed);
+        en(N.carplayOn, up && c.carplaySwitch().installed);
         this._write(N.carplayDirections, c.cardText('directions'));
         this._write(N.carplayEta, c.cardText('eta'));
-        ['carplayDirections', 'carplayEta'].forEach((k) => this._setEnabled(N[k], up && c.carplaySwitch().installed));
-        ['carplayZoomIn', 'carplayZoomOut'].forEach((k) => this._setEnabled(N[k], on && c.canCarplay() && c.playing()));
+        ['carplayDirections', 'carplayEta'].forEach((k) => en(N[k], up && c.carplaySwitch().installed));
+        ['carplayZoomIn', 'carplayZoomOut'].forEach((k) => en(N[k], on && c.canCarplay() && c.playing()));
         this._write(N.carplayCentre, c.centreText());
-        this._setEnabled(N.carplayCentre, up && c.carplaySwitch().installed);
+        en(N.carplayCentre, up && c.carplaySwitch().installed);
         this._write(N.carplayHudAlt, c.hudAltText());
-        this._setEnabled(N.carplayHudAlt, up && c.carplaySwitch().installed);
-        this._setEnabled(N.carplayMap, on && c.canCarplay());
-        this._setEnabled(N.carplayHud, on && c.canCarplay());
+        en(N.carplayHudAlt, up && c.carplaySwitch().installed);
+        en(N.carplayMap, on && c.canCarplay());
+        en(N.carplayHud, on && c.canCarplay());
         ['map', 'hud', 'console'].forEach((k) => {
             this._show(N[k], k !== 'console' || !up || c.hasOutput('console'));
-            this._setEnabled(N[k], on && c.canReplay());
+            en(N[k], on && c.canReplay());
         });
-        this._setEnabled(N.qrToggle, on);
+        en(N.qrToggle, on);
         this._showQr(link);
     }
 
@@ -337,6 +379,8 @@ class CastApp extends OnlineApp {
     _handleShutdown(reason) {
         if (this._shutdownPromise) return this._shutdownPromise;
         logger.info('vizualyse_cast shutdown: ' + JSON.stringify(reason));
+        if (this._stopSpeed) this._stopSpeed();
+        if (this._touch) this._touch.stop(); else this._control.hideTouch();
         this._control.close();
         const bundle = this.rhmiApplication && this.rhmiApplication.getResourceBundle();
         this._shutdownPromise = Promise.resolve()

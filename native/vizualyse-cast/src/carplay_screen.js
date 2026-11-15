@@ -296,6 +296,20 @@ function outputArgs(output) {
         'pad=' + t.w + ':' + t.h + ':-1:-1,fps=' + t.fps + ',format=yuv420p', '-f', 'rawvideo', 'pipe:1'];
 }
 
+/* The touch screen's live preview of the CarPlay map (its CarPlay tab): a
+ * second, small output of the same ffmpeg, RGBA on fd 4, PREVIEW.fps
+ * pictures a second, the phone's picture fitted into the preview's box
+ * (aspect kept, padded black). The rate is cut first, so only those few
+ * pictures are scaled. The tool reads fd 4 all the time ffmpeg runs (a
+ * full pipe would stall the cluster's output too) and keeps the pictures
+ * only while the preview shows. */
+const PREVIEW = { w: 760, h: 370, fps: 4 };
+function previewArgs(p) {
+    p = p || PREVIEW;
+    return ['-map', '0:v:0', '-vf', 'fps=' + p.fps + ',scale=' + p.w + ':' + p.h + ':force_original_aspect_ratio=decrease:flags=bilinear,' +
+        'pad=' + p.w + ':' + p.h + ':-1:-1,format=rgba', '-f', 'rawvideo', 'pipe:4'];
+}
+
 /* The switch's state for the pages: installed, on (the saved mode is alt),
  * and when what is saved differs from this start, from when it applies. */
 function switchState(o) {
@@ -310,4 +324,4 @@ function switchState(o) {
     return { installed: true, on: saved === 'alt', saved: saved, pending: pending };
 }
 
-module.exports = { TARGETS, RUN, VAR, ARM, MODES, VIEWS, VIEW_TITLES, DEFAULT_PORT, state, savedMode, setMode, switchState, drawFor, safeAreaFor, safeText, wantDisplay, wantView, sceneUrl, wantScene, requestZoom, inputArgs, outputArgs, readKv, displayText };
+module.exports = { TARGETS, RUN, VAR, ARM, MODES, VIEWS, VIEW_TITLES, DEFAULT_PORT, state, savedMode, setMode, switchState, drawFor, safeAreaFor, safeText, wantDisplay, wantView, sceneUrl, wantScene, requestZoom, inputArgs, outputArgs, PREVIEW, previewArgs, readKv, displayText };
