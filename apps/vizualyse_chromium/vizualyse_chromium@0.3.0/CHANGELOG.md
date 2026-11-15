@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0
+
+- **Opens on the touch screen**: the tool's controls in the app area, in
+  the touch kit shared by every Vizualyse app. *Browse*: the page (title,
+  address), Show on the screen, Back, Reload, Home, what the GPU offers
+  and the phone page's QR code; *Settings*: Resolution, Browser on / off,
+  GPU mode and Game mode. **List** (top right) brings this page back, as do
+  BACK and the car moving; the new first row, **Touch screen**, opens it
+  again.
+- The touch screen and the browser share the screen state: Show on the
+  screen swaps one for the other, and the touch screen comes back when the
+  browser goes. This page's **Show on the screen** opens the browser at
+  once, as before.
+- Requires vizualyse-chromium 0.3.0 (which draws the touch screen).
+
 ## 0.2.6
 
 - **Make room** is gone: the tool no longer stops the Moonlight and Cast

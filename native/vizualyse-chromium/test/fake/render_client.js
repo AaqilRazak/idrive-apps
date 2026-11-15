@@ -21,7 +21,13 @@ class RenderClient extends EventEmitter {
     show(on) { note('show ' + on); }
     claim(r) { note('claim ' + JSON.stringify(r)); }
     pixmap(id, w, h, f) { note('pixmap ' + id + ' ' + w + 'x' + h + ' ' + f); }
-    pixels(id) { note('pixels ' + id); }
+    /* a pixmap's changed rectangles (the touch screen): their area; the whole
+     * picture to <log>.<id>.rgba */
+    pixels(id, rects, data) {
+        const area = (rects || []).reduce((a, r) => a + r.w * r.h, 0);
+        note('pixels ' + id + (rects ? ' ' + rects.length + ' ' + area : ''));
+        if (LOG && data) fs.writeFileSync(LOG + '.' + id + '.rgba', data);
+    }
     /* each new list of ops (not every frame) */
     frameWords(u32) {
         const ops = Array.from(u32).filter((v, i) => i % 7 === 0).join(',');

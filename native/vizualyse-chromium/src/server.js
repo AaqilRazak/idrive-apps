@@ -23,6 +23,11 @@
  *   the page's touches.
  * - Only while parked: the iDrive app sends the speed; above 3 km/h the page
  *   is hidden and can't be shown.
+ * - The touch screen (touch_screen.js, the platform's touch kit): the
+ *   controls in the app area while the iDrive app's screen state is open
+ *   ({"cmd":"ui","on":true}). It and the browser's picture share that state,
+ *   one at a time: Show on the screen hides the touch screen first, and when
+ *   the picture goes it comes back if the app still wants it.
  *
  *   node server.js     (root: the renderer, the touch socket, nftables, the cgroup)
  */
@@ -38,7 +43,8 @@ const { URL } = require('url');
 const env = require('./env.js');
 const unpack = require('./unpack.js');
 const { Browser } = require('./browser.js');
-const { Screen } = require('./screen.js');
+const { Screen, CLIENT } = require('./screen.js');
+const { TouchUi } = require('./touch_screen.js');
 const firewall = require('./firewall.js');
 const { startControl } = require('./control.js');
 const { Bus } = require('./mqtt_bus.js');
@@ -71,6 +77,8 @@ const VIEW = (function () {
 const TOUCH_IFACE = process.env.CHROMIUM_TOUCH_IFACE !== undefined ? process.env.CHROMIUM_TOUCH_IFACE : 'vlan73';
 const TOUCH_SRC = process.env.CHROMIUM_TOUCH_SRC || '160.48.199.115';
 const TOUCH_FILE = process.env.CHROMIUM_TOUCH_FILE || '';
+/* the touch screen's reader (the kit's touch_reader.py) runs on mgu-python */
+const PYTHON = process.env.CHROMIUM_PYTHON || '/var/opt/mgu-python/current/bin/python3';
 /* The memory cgroup (v1, mounted on the unit) and its cap: the unit has ~5.6 GB in all */
 const CGROUP_ROOT = process.env.CHROMIUM_CGROUP_ROOT || '/sys/fs/cgroup/memory';
 /* The cap is a setting (the phone page): more lets bigger pages and games
@@ -131,6 +139,12 @@ unpack.mkdirp(env.ROOT, 0o755);
 try { fs.chmodSync(env.ROOT, 0o755); } catch (e) { /* not ours */ }
 const TOKEN = token();
 function link() { const ip = uplinkIp(); return ip ? 'http://' + ip + ':' + PORT + '/?t=' + TOKEN : null; }
+/* the link and the uplink's state for the touch screen, read every 2 s:
+ * its frames take them from here, never from the files */
+let netNow = { link: null, uplink: 'unknown' };
+function readNet() { netNow = { link: link(), uplink: (readJson(UPLINK_STATUS) || {}).state || 'unknown' }; }
+readNet();
+setInterval(readNet, 2000);
 
 /* What was typed into the address bar: a URL, a host name, or words to search. */
 function toUrl(s) {
@@ -205,6 +219,59 @@ let lastError = null;
 let stats = { pictures: 0, decodeMs: 0 };
 const screen = new Screen(log, path.join(env.BUNDLE, 'chromium-touch'));
 let wantShown = false;
+
+/* ---- the touch screen ---------------------------------------------------------- */
+
+/* the iDrive app's screen state is open and wants the touch screen (or the
+ * browser's picture, which goes up over the same state instead) */
+let touchWanted = false;
+const RESOLUTIONS = SCALES.map((s) => { const p = picSize(s); return { scale: s, w: p.w, h: p.h }; });
+const OOM_SHOWN_MS = 120000;
+function running() { return !!browser && browserState === 'running'; }
+function withBrowser(f) { if (!running()) return 'the browser is not running'; f(browser); return null; }
+const touchUi = new TouchUi({
+    dir: HERE, log: log, clientPath: CLIENT,
+    touch: { python: PYTHON, iface: TOUCH_IFACE, src: TOUCH_SRC, file: TOUCH_FILE,
+        cmd: process.env.CHROMIUM_UI_TOUCH_CMD ? JSON.parse(process.env.CHROMIUM_UI_TOUCH_CMD) : null },
+    /* from memory only: a frame asks for it */
+    state: () => ({
+        enabled: settings.enabled, bundle: bundle.state, browser: browserState, paused: busPaused, error: lastError || bundle.error || null,
+        gpuMode: gpuMode, gameMode: gameMode, gpuNote: gpuNote, gpu: gpu, scale: settings.scale, resolutions: RESOLUTIONS,
+        moving: moving(), kmh: vehicle.kmh !== null && Date.now() - vehicle.at < 10000 ? vehicle.kmh : null,
+        link: netNow.link, uplink: netNow.uplink,
+        url: browser ? browser.url : settings.url, title: browser ? browser.title : '',
+        oomMb: mem.note && mem.oomAt && Date.now() - Date.parse(mem.oomAt) < OOM_SHOWN_MS ? settings.memMb : null,
+    }),
+    actions: {
+        show: () => (settings.enabled ? show() : 'the browser is off'),
+        back: () => withBrowser((b) => b.history(-1).catch((e) => log('back: ' + e.message))),
+        reload: () => withBrowser((b) => b.reload().catch((e) => log('reload: ' + e.message))),
+        home: () => withBrowser((b) => b.navigate(settings.home).catch((e) => log('home: ' + e.message))),
+        scale: (s) => setScale(s),
+        enable: (on) => { setEnabled(on); return null; },
+        gpu: (on) => setGpu(on),
+        game: (on) => setGame(on),
+    },
+});
+touchUi.on('change', () => { if (control) control.broadcast(); });
+/* the List corner: the app goes back to its iDrive list */
+touchUi.on('list', () => {
+    touchWanted = false;
+    touchUi.hide('List');
+    if (control) { control.send({ ev: 'list' }); control.broadcast(); }
+});
+
+/* the browser's picture went: the touch screen again, if the app's screen
+ * state still wants it (a turn later: a hide and show at once, as a new
+ * resolution does, never brings it up between) */
+function touchBack() {
+    setImmediate(() => {
+        if (!touchWanted || stopping || screen.shown() || touchUi.shown() || moving()) return;
+        const e = touchUi.show();
+        log('ui: back after the browser' + (e ? ': ' + e : ''));
+        if (control) control.broadcast();
+    });
+}
 
 /* ---- the GPU mode ------------------------------------------------------------ */
 
@@ -330,6 +397,7 @@ function startBrowser() {
     b.on('navigated', (n) => {
         log('page: ' + n.url + (n.title ? ' "' + n.title.slice(0, 80) + '"' : ''));
         if (/^https?:/.test(n.url) && n.url !== settings.url) { settings.url = n.url; saveSettings(); }
+        touchUi.refresh();
         if (control) control.broadcast();
     });
     b.on('display', (e) => {
@@ -441,6 +509,9 @@ function show() {
     if (busPaused) { wantShown = false; return 'the browser is paused: ' + busPaused; }
     if (!browser || browserState !== 'running') return null;   /* shown once it runs */
     if (screen.shown()) return null;
+    /* one picture at a time over the app's screen state: the touch screen
+     * goes first (its mgu-render client closed), then the browser's */
+    if (touchUi.shown()) touchUi.hide('the browser on the screen');
     const touch = TOUCH_FILE ? { file: TOUCH_FILE } : TOUCH_IFACE ? { iface: TOUCH_IFACE, src: TOUCH_SRC } : null;
     screen.show(VIEW, touch, picSize(settings.scale), browser, via());
     log('screen: shown (' + screen.via + ')');
@@ -450,14 +521,34 @@ function show() {
 function hide(why) {
     wantShown = false;
     touchDown = false;
-    if (screen.shown()) { screen.hide(); log('screen: hidden (' + why + ')'); }
+    if (screen.shown()) { screen.hide(); log('screen: hidden (' + why + ')'); touchBack(); }
 }
 
 function setSpeed(kmh) {
     const v = Number(kmh);
     vehicle.kmh = isFinite(v) ? v : null;
     vehicle.at = Date.now();
-    if (moving() && (wantShown || screen.shown())) hide('driving (' + v.toFixed(0) + ' km/h)');
+    if (!moving()) return;
+    /* the app shows its list: neither picture comes back by itself */
+    if (touchWanted || touchUi.shown()) { touchWanted = false; touchUi.hide('the car is moving'); }
+    if (wantShown || screen.shown()) hide('driving (' + v.toFixed(0) + ' km/h)');
+}
+
+/* the app's screen state: open (the touch screen, or with browser the
+ * browser's picture at once), or gone (both pictures hidden) */
+function setUi(on, andBrowser) {
+    if (!on) {
+        touchWanted = false;
+        touchUi.hide('the app hid it');
+        if (wantShown || screen.shown()) hide('the app\'s screen state went');
+        return null;
+    }
+    if (moving()) return 'only while parked';
+    touchWanted = true;
+    let err = null;
+    if (andBrowser) err = settings.enabled ? show() : 'the browser is off';
+    if (!screen.shown()) err = touchUi.show() || err;
+    return err;
 }
 
 /* ---- status ------------------------------------------------------------------ */
@@ -616,6 +707,8 @@ function status() {
         scale: settings.scale, resolutions: SCALES.map((s) => { const p = picSize(s); return { scale: s, w: p.w, h: p.h }; }),
         memory: { capMb: settings.memMb, choices: MEM_CHOICES, usedMb: mem.usedMb, peakMb: mem.peakMb, workMb: mem.workMb, purges: mem.purges, oomAt: mem.oomAt, note: mem.note },
         bus: bus.state(), paused: busPaused,
+        /* the touch screen: up, and wanted by the app's screen state */
+        touch: touchUi.shown(), touchWanted: touchWanted,
     };
 }
 
@@ -701,6 +794,8 @@ function command(c) {
     if (c.cmd === 'speed') { setSpeed(c.kmh); return null; }
     if (c.cmd === 'enable') { setEnabled(true); return null; }
     if (c.cmd === 'disable') { setEnabled(false); return null; }
+    /* the touch screen works with the browser off too (its Settings turn it on) */
+    if (c.cmd === 'ui') return setUi(!!c.on, !!c.browser);
     if (!settings.enabled) return 'the browser is off';
     if (c.cmd === 'show') return show();
     if (c.cmd === 'hide') { hide('hidden on the iDrive page'); return null; }
@@ -723,6 +818,8 @@ function shutdown(sig) {
     if (stopping) return;
     stopping = true;
     log('stopping (' + sig + ')');
+    touchWanted = false;
+    touchUi.hide('the tool stops');
     stopBrowser();
     removeFirewall();
     if (control) control.close();

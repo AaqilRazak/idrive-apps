@@ -11,18 +11,52 @@ car on the unit's own root filesystem (below).
 1. Install **Browser** (this tool) and the **Browser** iDrive app
    ([apps/vizualyse_chromium](../../apps/vizualyse_chromium)) from the Store.
    The first start unpacks Chromium (about 420 MB in `/var/opt`).
-2. Open **Browser** on the iDrive. It says what Chromium got:
-   `WebGPU: CPU (SwiftShader) | WebGL 2: CPU (SwiftShader) | JSPI: ok`.
-   **GPU mode** (the iDrive page or the phone page) restarts it on the GPU:
-   `WebGL 2: GLES 3.2, Intel HD Graphics 505 (APL 3)` is the goal.
+2. Open **Browser** on the iDrive: it opens on this tool's **touch
+   screen** (below). *Browse* says what Chromium got:
+   `WebGPU: CPU (SwiftShader) · WebGL 2: CPU (SwiftShader) · JSPI: ok`.
+   **GPU mode** (*Settings*, the iDrive list or the phone page) restarts it
+   on the GPU: `WebGL 2: GLES 3.2, Intel HD Graphics 505 (APL 3)` is the
+   goal. **List** (top right) shows the iDrive list, which has everything
+   too.
 3. **Show on the screen**: the page (`https://webglreport.com/?v=2` at
-   first) covers the app area; touch it as any page. The iDrive's back
-   arrow on the left (or HOME, a pop-up, a call) hides it again. Under the
-   browser the app shows an empty page, so touches on the browser press
+   first) covers the app area in place of the touch screen; touch it as any
+   page. The iDrive's back arrow on the left (or HOME, a pop-up, a call)
+   hides it again; hidden from the phone, the touch screen comes back.
+   Under both the app shows an empty page, so touches on them press
    nothing of the HMI.
-4. Scan the QR code with the phone whose hotspot the car is on for the
-   address bar, back / forward / reload, typing into the page, the GPU
-   report (`chrome://gpu`) and a restart.
+4. Scan the QR code (on the touch screen, or the iDrive list) with the
+   phone whose hotspot the car is on for the address bar, back / forward /
+   reload, typing into the page, the GPU report (`chrome://gpu`) and a
+   restart.
+
+### The touch screen
+
+`touch_screen.js` and `touch_view.js`, in the platform's touch kit
+(`tool/touch_ui`: `ui_kit.js`, `ui_host.js`, `ui_canvas.js`, the fonts and
+`touch_reader.py`, copied into `src/`). The app asks for it with
+`{"cmd":"ui","on":true}` once its empty screen state shows, and with `on:
+false` when the state goes (BACK, HOME, a pop-up).
+
+- *Browse*: the page (title, address), **Show on the screen**, Back, Reload,
+  Home, the GPU row, and the phone page's QR code (made once per link from
+  the platform's `common/qrcode`). *Settings*: Resolution (the five scales
+  and their picture sizes), Browser on / off, GPU mode, Game mode, each on
+  when the iDrive list's row is. The status line says what the browser is
+  doing; its right end, Parked or the speed in mph.
+- One picture at a time over the app's screen state: Show on the screen
+  hides the touch screen (its own mgu-render client, `vizualyse_chromium_ui`,
+  closed) before the browser's goes up; when the browser goes (the phone's
+  Hide, a restart, the GPU or game mode, a crash) the touch screen comes
+  back if the app still wants it. A new resolution or output hides and
+  shows the browser in one go: no touch screen between.
+  `{"cmd":"ui","on":true,"browser":true}` (the iDrive list's Show) puts the
+  browser up at once.
+- **List** hides it and sends the app `{"ev":"list"}`. The car moving (above
+  3 km/h) hides both pictures, and `ui` is refused until it stops.
+- Frames from memory: the link and the uplink's state are read every 2 s,
+  never by a frame. One opaque RGBX pixmap the size of the app area; only
+  what changed is sent (a button's press: its 96x96). Touch is read
+  passively by `touch_reader.py` on mgu-python (hence `requires`).
 
 ## Why it is built this way
 
@@ -208,7 +242,8 @@ filesystem (`../idrive-rootfs`):
 | `chromium-touch` | root, then nobody | C (`sink/touch_main.c`), while shown: the display's touches as JSON lines |
 | `screen.js` | root | the frame file `/dev/shm/mgu-video-vizualyse_chromium` (nobody's, for `chromium-wl`) and the mgu-render client in layer mode, in the app area |
 | `proxy.js` | uid 12997 | HTTP / CONNECT on 127.0.0.1:8483, names through the phone's DNS |
-| `control.js` | root | `/dev/shm/vizualyse-chromium/ctl.sock` for the app only: status; enable, disable, show, hide, home, reload, back, gpu, speed |
+| `control.js` | root | `/dev/shm/vizualyse-chromium/ctl.sock` for the app only: status; ui, enable, disable, show, hide, home, reload, back, gpu, speed; the `list` event |
+| `touch_screen.js`, `touch_view.js` | root | the touch screen in the kit (`ui_*.js`, `touch_reader.py` as nobody on mgu-python), its own mgu-render client in the app area while the app's screen state is open and the browser is not up |
 | `firewall.js` | root | the phone page's TCP 8491 on `wlan0`, in memory |
 
 State in `/var/opt/vizualyse-chromium/state` (root): the token, the settings
@@ -249,6 +284,15 @@ is in `/var/opt/vizualyse-chromium/profile` (uid 12997). The journal has an
     `hide` removes the frame file; the GPU mode: off at start, a leftover
     `gpu-trial` reported, `gpu` on restarts Chromium through the shim and
     goes back to the CPU by itself; `disable` / `enable`.
+- `sh test/run_touch_test.sh [out dir]` runs `test/touch_test.js` in Node 8
+  (no Chromium: a stand-in browser): the touch screen's look (lint clean in
+  both tabs and six states, the QR code, a press redraws its button alone;
+  PNGs of Browse and Settings), then `server.js` end to end: `ui` shows it
+  in the app area, Back / Reload / Home, the resolution's dropdown, game
+  mode and the browser off / on from Settings, Show on the screen swaps it
+  for the browser (its client closed first), the browser hidden brings it
+  back, a new resolution does not flash it, moving hides both, List and
+  `ui` off.
 - What the bench can't tell: anything about the unit's GPU and kernel (the
   container has neither: 0.1.1's hang was only seen on the car), so whether
   the GPU mode renders; the frame rate the Atom manages, the memory a heavy

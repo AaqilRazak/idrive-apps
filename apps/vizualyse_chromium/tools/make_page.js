@@ -9,6 +9,7 @@ const T = process.argv[2];
 /* [id, type, widget, name, focusable, first text] */
 const C = [
     [20, 'label', 'LT_Label_1Row', 'browserStatus', 0, 'Connecting...'],
+    [39, 'button', 'LT_Button_1Row', 'browserTouch', 3, 'Touch screen'],
     [21, 'label', 'LT_Label_1Graphic_Scalable', 'browserQr', 0, null],
     [22, 'label', 'LT_Label_1Row', 'browserLink', 0, ''],
     [23, 'label', 'LT_Label_1Row', 'browserHint', 0, ''],
@@ -31,10 +32,11 @@ let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- SPDX-License-Identifier:
 C.forEach(([id, type, widget, , focus]) => {
     xml += `            <component id="${id}" type="${type}" widget="${widget}">\n                <property id="2" value="1"/>\n                <property id="3" value="${focus}"/>\n            </component>\n`;
 });
-/* The screen state (2, ParentState 1): opened while the browser covers the
- * app area. Nothing focusable or touchable on it, because the HMI still gets
- * every touch on the browser (read passively) and would press whatever lies
- * under it. BACK (the arrow outside the browser) returns to the main page. */
+/* The screen state (2, ParentState 1): opened while the tool's touch screen
+ * or the browser covers the app area: the app opens it on entry. Nothing
+ * focusable or touchable on it, because the HMI still gets every touch on
+ * them (read passively) and would press whatever lies under it. BACK (the
+ * arrow outside them) returns to the main page. */
 xml += '        </layoutGroup>\n    </container>\n' +
     '    <container id="2" type="state" widget="LT_State_Wide">\n        <property id="9" value="1"/>\n' +
     '        <layoutGroup id="101" name="Titlebar">\n' +
@@ -59,7 +61,7 @@ fs.writeFileSync(path.join(dir, 'uiDescription.json'),
         2: { type: 'state', name: 'ST_OnlineApps_VizualyseChromiumScreen', components: {
             50: { type: 'title', name: 'browserScreenTitle', properties: vis, rows: [{ Text: { value: 'SID_CHROMIUM_TITLE', type: 'StringId' } }] },
             51: { type: 'label', name: 'browserScreenNote', properties: Object.assign({}, vis, { Focusable: { value: 0, type: 'UInt' } }),
-                rows: [{ Text: { value: 'The browser is on the screen. Back returns here.', type: 'Text' } }] },
+                rows: [{ Text: { value: 'The touch screen or the browser is up. List (top right) or Back shows the list.', type: 'Text' } }] },
         } },
     } }, null, 2) + '\n');
 console.log('page: ' + C.length + ' rows');

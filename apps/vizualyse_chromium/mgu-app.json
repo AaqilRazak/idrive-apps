@@ -1,11 +1,12 @@
 {
   "schema": 1,
   "id": "vizualyse_chromium",
-  "version": "0.2.6",
-  "tree": "vizualyse_chromium@0.2.6",
+  "version": "0.3.0",
+  "tree": "vizualyse_chromium@0.3.0",
   "modules": [
     "src/vizualyse_chromium.js",
     "src/chromium_control.js",
+    "src/touch_mode.js",
     "src/vehicle_speed.js",
     "src/qr_png.js",
     "src/qrcode.js"

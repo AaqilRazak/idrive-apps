@@ -4,10 +4,14 @@
  * The app's side of the vizualyse-chromium tool's control socket:
  * /dev/shm/vizualyse-chromium/ctl.sock, a Unix stream socket,
  * newline-delimited JSON. The tool sends {"ev":"status", ...} on connect,
- * after every command and once a second, and {"ev":"error","error":...} for
- * a failed command; the app sends {"cmd":"enable"} / {"cmd":"disable"} (the
- * browser runs or not), {"cmd":"show"} / {"cmd":"hide"} (the page on the
- * central screen), {"cmd":"home"}, {"cmd":"reload"}, {"cmd":"back"},
+ * after every command and once a second, {"ev":"error","error":...} for a
+ * failed command and {"ev":"list"} when the touch screen's List corner is
+ * tapped (back to the list); the app sends {"cmd":"enable"} /
+ * {"cmd":"disable"} (the browser runs or not), {"cmd":"ui","on":bool,
+ * "browser":bool} (its screen state is open: the touch screen, or with
+ * browser the page at once; off: whichever is up hidden), {"cmd":"show"} /
+ * {"cmd":"hide"} (the page on the central screen), {"cmd":"home"},
+ * {"cmd":"reload"}, {"cmd":"back"},
  * {"cmd":"gpu","on":true|false} (the GPU mode, experimental),
  * {"cmd":"scale","scale":1|0.75|0.5|1/3|0.25} (the resolution),
  * {"cmd":"game","on":true|false} (game mode, experimental) and
@@ -73,6 +77,8 @@ class BrowserControl extends EventEmitter {
                 try { ev = JSON.parse(line); } catch (e) { continue; }
                 if (!ev) continue;
                 if (ev.ev === 'status') { this.status = ev; this.emit('change'); }
+                /* the touch screen's List corner: back to the list */
+                else if (ev.ev === 'list') this.emit('list');
                 else if (ev.ev === 'error') {
                     this.lastError = { text: String(ev.error || 'the command failed'), at: Date.now() };
                     this.emit('change');
@@ -113,11 +119,20 @@ class BrowserControl extends EventEmitter {
     gameMode() { return !!(this.status && this.status.gameMode); }
     /* off while another tool (a Steam game) asks it off on the tools' bus */
     paused() { return !!(this.status && this.status.paused); }
+    /* the screen state is open: the touch screen, or with browser the page at once */
+    ui(browser) { return this._send(browser ? { cmd: 'ui', on: true, browser: true } : { cmd: 'ui', on: true }); }
     /* not buttons: they leave a button's error on the status line alone */
     hide() {
         if (!this.sock || !this.status || !this.status.shown) return false;
         this.sock.write(JSON.stringify({ cmd: 'hide' }) + '\n');
         return true;
+    }
+    /* the screen state gone: the touch screen and the page hidden; true if either was up */
+    hideAll() {
+        const s = this.status;
+        if (!this.sock || !s || !(s.shown || s.touch || s.touchWanted)) return false;
+        this.sock.write(JSON.stringify({ cmd: 'ui', on: false }) + '\n');
+        return !!(s.shown || s.touch);
     }
     speed(kmh) {
         if (!this.sock || !this.status) return false;
@@ -129,6 +144,10 @@ class BrowserControl extends EventEmitter {
     enabled() { return !(this.status && this.status.enabled === false); }
     running() { return !!(this.status && this.status.browser === 'running'); }
     shown() { return !!(this.status && this.status.shown); }
+    /* the touch screen is up */
+    touchShown() { return !!(this.status && this.status.touch); }
+    /* one of the tool's two pictures (the touch screen, the page) is up */
+    pictureUp() { return this.shown() || this.touchShown(); }
     gpuMode() { return !!(this.status && this.status.gpuMode); }
     scaleNow() { return (this.status && this.status.scale) || 1; }
     /* the next resolution, round: full, 3/4, 1/2, 1/3, 1/4 (the tool's list) */
@@ -167,6 +186,7 @@ class BrowserControl extends EventEmitter {
         }
         if (s.moving) return 'Only while parked - the car is moving (' + s.speed + ' km/h)';
         if (s.shown) return 'On the screen - the back arrow on the left returns here';
+        if (s.touch) return 'The touch screen is up - List (top right) or the back arrow returns here';
         if (!s.link) return 'Ready - Show puts it on the screen (phone page: waiting for the hotspot, uplink ' + (s.uplink || 'unknown') + ')';
         return 'Ready - Show puts it on the screen; scan the QR code to type addresses';
     }

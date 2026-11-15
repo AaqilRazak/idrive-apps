@@ -11,10 +11,14 @@
  *
  * Covers: application.xml and uiDescription.json agree and the app binds
  * every button; with no tool the status says so and the buttons are off;
- * connected, the link is written and shown as a QR PNG (a new file per
- * link, the old handle released), the page and the GPU lines; Show, Home
+ * entered with the tool there and parked, the touch screen opens by itself
+ * (the empty screen state, then "ui" once it is visible) and its List corner
+ * ({"ev":"list"}) closes the state to the page; the Touch screen row opens
+ * it again and the car moving closes it; connected, the link is written and
+ * shown as a QR PNG (a new file per link, the old handle released), the page
+ * and the GPU lines; Show (the screen state with the browser at once), Home
  * page, Reload and Back send theirs; a pop-up (focus lost 300 ms) and
- * leaving the page send hide, a focus blip does not; the car's speed (a
+ * leaving the page send "ui" off, a focus blip does not; the car's speed (a
  * fake Vehicle2) goes to the tool once a second, also with the page
  * hidden; "only while parked"; a failed command's error; installing,
  * starting, a software WebGPU; on / off; the tool going away.
@@ -99,6 +103,13 @@ rhmi.openState = (st) => {
     setImmediate(() => { byName[STATE].emit('visible', { visible: false }); st.emit('visible', { visible: true }); });
     return Promise.resolve();
 };
+/* closeState: the state goes, the main state comes */
+const closed = [];
+rhmi.closeState = (st) => {
+    closed.push(st);
+    setImmediate(() => { st.emit('visible', { visible: false }); byName[STATE].emit('visible', { visible: true }); });
+    return Promise.resolve();
+};
 rhmi.getResourceBundle = () => bundle;
 rhmi.flush = () => Promise.resolve();
 
@@ -180,6 +191,7 @@ function startFakeTool(opts) {
     server.listen(PIPE);
     return {
         broadcast() { clients.forEach((x) => send(x, status())); },
+        event(obj) { clients.forEach((x) => send(x, obj)); },
         clients() { return clients.size; },
         close() { clients.forEach((x) => x.destroy()); server.close(); },
     };
@@ -191,7 +203,8 @@ const GPU = { mode: 'cpu', webgpu: 'google / swiftshader', webgpuFallback: true,
 /* the GPU mode on the car: ANGLE on the unit's Mesa 19 GLES */
 const GPU_GLES = Object.assign({}, GPU, { mode: 'gpu', webgl2: 'ANGLE (Intel Open Source Technology Center, Mesa DRI Intel(R) HD Graphics 505 (APL 3) , OpenGL ES 3.2 Mesa 19.0.6)' });
 const BASE = { enabled: true, link: LINK1, uplink: 'online', bundle: 'ready', browser: 'running', shown: false, url: 'https://webglreport.com/?v=2',
-    title: 'WebGL Report', home: 'https://webglreport.com/?v=2', gpu: GPU, gpuMode: false, gpuNote: null, speed: null, moving: false, pictures: 0, decodeMs: 0, view: '1790x638', error: null };
+    title: 'WebGL Report', home: 'https://webglreport.com/?v=2', gpu: GPU, gpuMode: false, gpuNote: null, speed: null, moving: false, pictures: 0, decodeMs: 0, view: '1790x638', error: null,
+    touch: false, touchWanted: false };
 let st = Object.assign({}, BASE);
 const received = [];
 let refuse = null;
@@ -200,13 +213,19 @@ function serve() {
     tool = startFakeTool({ status: () => st, command: (c) => {
         received.push(c);
         if (c.cmd === 'speed') return null;
-        if (c.cmd === 'show') st = Object.assign({}, st, { shown: true });
-        if (c.cmd === 'hide') st = Object.assign({}, st, { shown: false });
+        if (c.cmd === 'show') st = Object.assign({}, st, { shown: true, touch: false });
+        /* the browser gone: the touch screen back while the app wants it (the tool's) */
+        if (c.cmd === 'hide') st = Object.assign({}, st, { shown: false, touch: st.touchWanted });
+        if (c.cmd === 'ui' && c.on) st = Object.assign({}, st, c.browser ? { shown: true, touch: false, touchWanted: true } : { touch: !st.shown, touchWanted: true });
+        if (c.cmd === 'ui' && !c.on) st = Object.assign({}, st, { shown: false, touch: false, touchWanted: false });
         const r = refuse; refuse = null; return r;
     } });
 }
 const sent = (cmd) => received.some((c) => c.cmd === cmd);
 const count = (cmd) => received.filter((c) => c.cmd === cmd).length;
+const uiOn = (browser) => received.filter((c) => c.cmd === 'ui' && c.on && !!c.browser === !!browser).length;
+const uiOff = () => received.filter((c) => c.cmd === 'ui' && !c.on).length;
+const BUTTONS = ['browserTouch', 'browserShow', 'browserEnable', 'browserGpuMode', 'browserResolution', 'browserGame', 'browserHome', 'browserReload', 'browserBack'];
 
 async function main() {
     const comps = UI.containers['1'].components;
@@ -217,11 +236,12 @@ async function main() {
     assert.strictEqual(scr.name, SCREEN);
     assert(Object.keys(scr.components).every((id) => scr.components[id].type !== 'button' &&
         !(scr.components[id].properties.Focusable && scr.components[id].properties.Focusable.value)), 'the screen state has nothing to press');
-    assert(/<container id="2" type="state" widget="LT_State_Wide">\n {8}<property id="9" value="1"\/>/.test(XML), 'the screen state\'s parent is the main state');
+    assert(/<container id="2" type="state" widget="LT_State_Wide">\r?\n {8}<property id="9" value="1"\/>/.test(XML), 'the screen state\'s parent is the main state');
     assert.strictEqual(comps['21'].name, 'browserQr');
     assert(/<component id="21" type="label" widget="LT_Label_1Graphic_Scalable">/.test(XML), 'the QR is a scalable graphic label');
     const buttons = Object.keys(comps).filter((id) => comps[id].type === 'button').map((id) => comps[id].name).sort();
-    assert.deepStrictEqual(buttons, ['browserBack', 'browserEnable', 'browserGame', 'browserGpuMode', 'browserHome', 'browserReload', 'browserResolution', 'browserShow']);
+    assert.deepStrictEqual(buttons, BUTTONS.slice().sort());
+    assert.strictEqual(comps[/<component id="(\d+)" type="button"/.exec(XML)[1]].name, 'browserTouch', 'Touch screen is the first row to press');
     const ep = APP_JSON.application.entryPoints[0];
     assert(fs.existsSync(path.join(PKG, 'rhmiData', 'variantGroups', 'Common', 'images', ep.icon)), 'the tile icon ships');
     const strings = JSON.parse(fs.readFileSync(path.join(PKG, 'rhmiData', 'variantGroups', 'Common', 'texts', 'en_GB.json'), 'utf8'));
@@ -233,27 +253,41 @@ async function main() {
     assert(v2 && v2.instances[0] === '1' && v2.attributes.statusCarSpeed2 === 'r', 'the manifest asks to read Vehicle2.statusCarSpeed2');
     /* plain ASCII in every text the page starts with (Unicode is unreliable in RHMI Text) */
     assert(!/[^\x00-\x7f]/.test(JSON.stringify(UI)), 'uiDescription.json is ASCII');
-    console.log('ok   page: 8 buttons, a QR graphic, an empty screen state, xml and uiDescription agree; tile text, icon and files[]; Vehicle2 speed in the manifest; ASCII');
+    console.log('ok   page: 9 buttons (Touch screen first), a QR graphic, an empty screen state, xml and uiDescription agree; tile text, icon and files[]; Vehicle2 speed in the manifest; ASCII');
 
     process.exit = (code) => { throw new Error('process.exit(' + code + ')'); };
     runSource();
+    /* the HMI shows the entry state */
+    setTimeout(() => byName[STATE].emit('visible', { visible: true }), 50);
     const S = byName.browserStatus, P = byName.browserPage, G = byName.browserGpu;
     await until('no-tool status', () => /not running/.test(S.text || ''));
     assert(!logs.some((l) => /^error/.test(l)), logs.filter((l) => /^error/.test(l)).join('\n'));
-    ['browserShow', 'browserEnable', 'browserGpuMode', 'browserResolution', 'browserGame', 'browserHome', 'browserReload', 'browserBack'].forEach((n) => assert.strictEqual(byName[n].enabled, false, n + ' disabled'));
+    BUTTONS.forEach((n) => assert.strictEqual(byName[n].enabled, false, n + ' disabled'));
     assert.strictEqual(byName.browserEnable.text, 'Browser: not running');
     assert.strictEqual(byName.browserQr.visible, false);
     console.log('ok   without the tool: "' + S.text + '", buttons disabled, no QR');
 
     serve();
+    /* entered with the tool there and parked: the touch screen by itself; its List corner: the page */
+    await until('the screen state opened by itself', () => opened.length === 1 && opened[0] === byName[SCREEN]);
+    await until('the touch screen shown', () => uiOn(false) === 1 && /^The touch screen is up/.test(S.text || ''));
+    st = Object.assign({}, st, { touch: false, touchWanted: false });
+    tool.event({ ev: 'list' });
+    tool.broadcast();
+    await until('the page back on List', () => closed.length === 1 && closed[0] === byName[SCREEN]);
+    await sleep(600);
+    assert.strictEqual(opened.length, 1, 'the touch screen does not come back by itself after List');
+    console.log('ok   entered: the touch screen opens by itself (screen state, then ui); its List corner closes it to the page');
+
     await until('ready status', () => /^Ready/.test(S.text || ''));
+    assert.strictEqual(byName.browserTouch.text, 'Touch screen');
     assert.strictEqual(byName.browserLink.text, LINK1);
     assert(/^Scan with the phone/.test(byName.browserHint.text));
     await until('QR graphic', () => byName.browserQr.graphic);
     const qr1 = byName.browserQr.graphic.value;
     assert(handles.has(qr1) && fs.readFileSync(qr1).slice(1, 4).toString() === 'PNG', 'a PNG with a resource handle');
     assert.strictEqual(byName.browserEnable.text, 'Browser: on');
-    ['browserShow', 'browserEnable', 'browserGpuMode', 'browserResolution', 'browserGame', 'browserHome', 'browserReload', 'browserBack'].forEach((n) => assert.strictEqual(byName[n].enabled, true, n + ' enabled'));
+    BUTTONS.forEach((n) => assert.strictEqual(byName[n].enabled, true, n + ' enabled'));
     assert.strictEqual(P.text, 'WebGL Report - https://webglreport.com/?v=2');
     assert.strictEqual(G.text, 'WebGPU: CPU (SwiftShader) | WebGL 2: CPU (SwiftShader) | JSPI: ok');
     assert(G.text.length <= 90, 'the GPU line is one row');
@@ -354,47 +388,70 @@ async function main() {
     await until('and gone after 2 minutes', () => /^Ready/.test(S.text || ''));
     console.log('ok   running out of memory shows on the status line for 2 minutes');
 
-    /* Show: the empty screen state first, the browser once it is visible */
+    /* Show: the empty screen state first, then the browser at once over it (ui with browser) */
     await sleep(450);
     byName.browserShow.emit('action');
-    await until('the screen state opened', () => opened.length === 1 && opened[0] === byName[SCREEN]);
-    await until('show sent once it is visible', () => sent('show'));
+    await until('the screen state opened', () => opened.length === 2 && opened[1] === byName[SCREEN]);
+    await until('ui with browser sent once it is visible', () => uiOn(true) === 1);
+    assert.strictEqual(uiOn(false), 1, 'not the touch screen first');
     await until('shown', () => /^On the screen/.test(S.text || ''));
-    await until('every button off while covered', () => ['browserShow', 'browserEnable', 'browserGpuMode', 'browserResolution', 'browserGame', 'browserHome', 'browserReload', 'browserBack'].every((n) => byName[n].enabled === false));
     await sleep(600);
-    assert.strictEqual(count('hide'), 0, 'the main state going away for the screen state does not hide');
-    console.log('ok   Show opens the empty screen state, then sends show; the main page\'s buttons are off while covered');
+    assert.strictEqual(uiOff(), 1, 'the main state going away for the screen state does not hide (only List did)');
+    console.log('ok   Show opens the empty screen state, then the browser at once over it');
+
+    /* the browser hidden (the phone's Hide): the tool brings the touch screen back on the open state */
+    st = Object.assign({}, st, { shown: false, touch: true });
+    tool.broadcast();
+    await until('the touch screen said', () => /^The touch screen is up/.test(S.text || ''));
+    await sleep(400);
+    assert.strictEqual(closed.length, 1, 'the screen state stays open for it');
+    st = Object.assign({}, st, { shown: true, touch: false });
+    tool.broadcast();
 
     /* a pop-up takes the screen state's focus: hidden after a moment */
     byName[SCREEN].emit('focus', { focus: false });
-    await until('hide sent on focus loss', () => sent('hide'), 2000);
+    await until('ui off sent on focus loss', () => uiOff() === 2, 2000);
     await until('buttons back', () => byName.browserShow.enabled === true && byName.browserHome.enabled === true);
     byName[SCREEN].emit('focus', { focus: true });
     /* shown again on the open screen state at once; a focus blip: nothing */
     await sleep(450);
     byName.browserShow.emit('action');
     await until('shown again', () => st.shown);
-    assert.strictEqual(opened.length, 1, 'the screen state, still open, is not opened again');
-    const hides = count('hide');
+    assert.strictEqual(opened.length, 2, 'the screen state, still open, is not opened again');
+    const hides = uiOff();
     byName[SCREEN].emit('focus', { focus: false });
     await sleep(100);
     byName[SCREEN].emit('focus', { focus: true });
     await sleep(600);
-    assert.strictEqual(count('hide'), hides, 'a short focus blip does not hide');
+    assert.strictEqual(uiOff(), hides, 'a short focus blip does not hide');
     /* BACK: the screen state goes, the main page comes back: hidden */
     byName[SCREEN].emit('visible', { visible: false });
     byName[STATE].emit('visible', { visible: true });
-    await until('hide sent on BACK', () => count('hide') === hides + 1, 1500);
-    console.log('ok   a pop-up (focus lost 300 ms) and BACK hide the browser; a focus blip does not');
+    await until('ui off sent on BACK', () => uiOff() === hides + 1, 1500);
+    console.log('ok   a pop-up (focus lost 300 ms) and BACK hide the browser (ui off); a focus blip does not');
+
+    /* the Touch screen row: the screen state and the touch screen; the car moving: the page back */
+    await sleep(450);
+    byName.browserTouch.emit('action');
+    await until('the screen state for the touch screen', () => opened.length === 3);
+    await until('the touch screen again', () => st.touch && uiOn(false) === 2);
+    st = Object.assign({}, st, { moving: true, speed: 30, touch: false, touchWanted: false });
+    tool.broadcast();
+    await until('the page back when the car moves', () => closed.length === 2);
+    await until('Touch screen off while moving', () => byName.browserTouch.enabled === false && byName.browserTouch.text === 'Touch screen (only while parked)');
+    st = Object.assign({}, st, { moving: false, speed: null });
+    tool.broadcast();
+    await until('Touch screen on again', () => byName.browserTouch.enabled === true && byName.browserTouch.text === 'Touch screen');
+    console.log('ok   the Touch screen row opens it again; the car moving closes it to the page');
 
     /* the HMI won't open the screen state: the browser goes over the main page, its buttons off */
     openFails = true;
     await sleep(450);
     byName.browserShow.emit('action');
     await until('fallback show', () => st.shown, 2000);
-    await until('buttons off over the main page', () => byName.browserHome.enabled === false);
-    assert(logs.some((l) => /^warn: screen state: openState failed/.test(l)), 'the fallback is logged');
-    logs.splice(0, logs.length, ...logs.filter((l) => !/^warn: screen state:/.test(l)));
+    await until('buttons off over the main page', () => byName.browserHome.enabled === false && byName.browserTouch.enabled === false);
+    assert(logs.some((l) => /^warn: touch: screen state: openState failed/.test(l)), 'the fallback is logged');
+    logs.splice(0, logs.length, ...logs.filter((l) => !/^warn: touch: screen state:/.test(l)));
     openFails = false;
     byName[STATE].emit('focus', { focus: false });
     await until('hidden by the pop-up', () => !st.shown, 2000);
@@ -409,12 +466,12 @@ async function main() {
     await until('speed 30 sent', () => received.some((c) => c.cmd === 'speed' && c.kmh === 30), 3000);
     st = Object.assign({}, st, { moving: true, speed: 30, shown: false });
     tool.broadcast();
-    await until('moving shown', () => /^Only while parked - the car is moving \(30 km\/h\)/.test(S.text || '') && byName.browserShow.enabled === false);
+    await until('moving shown', () => /^Only while parked - the car is moving \(30 km\/h\)/.test(S.text || '') && byName.browserShow.enabled === false && byName.browserTouch.enabled === false);
     st = Object.assign({}, st, { moving: false, speed: 0 });
     speedRaw = 0;
     tool.broadcast();
     await until('ready again', () => /^Ready/.test(S.text || '') && byName.browserShow.enabled === true);
-    console.log('ok   the speed goes to the tool once a second (none while invalid); "only while parked" shows, Show off');
+    console.log('ok   the speed goes to the tool once a second (none while invalid); "only while parked" shows, Show and Touch screen off');
 
     refuse = 'the browser is not running';
     await sleep(450);
@@ -477,7 +534,7 @@ async function main() {
     assert.strictEqual(tool.clients(), 1, 'the socket stays open with the page hidden');
     assert(count('speed') > n, 'the speed goes on with the page hidden');
     byName[STATE].emit('visible', { visible: true });
-    assert(!received.some((c) => !/^(speed|show|hide|home|reload|back|enable|disable|gpu|scale|game)$/.test(c.cmd)), 'nothing else sent');
+    assert(!received.some((c) => !/^(speed|ui|show|hide|home|reload|back|enable|disable|gpu|scale|game)$/.test(c.cmd)), 'nothing else sent');
     console.log('ok   hiding the page keeps the socket and the speed going');
 
     tool.close();

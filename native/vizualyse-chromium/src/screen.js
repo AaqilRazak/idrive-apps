@@ -172,4 +172,4 @@ class Screen extends EventEmitter {
     }
 }
 
-module.exports = { Screen, available, frameFile, FILE };
+module.exports = { Screen, available, frameFile, FILE, CLIENT };
