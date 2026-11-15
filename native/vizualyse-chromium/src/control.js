@@ -9,9 +9,12 @@
  * {"cmd":"disable"} (the browser runs or not), {"cmd":"show"} / {"cmd":"hide"}
  * (the page on the centre screen), {"cmd":"home"}, {"cmd":"reload"},
  * {"cmd":"back"}, {"cmd":"speed","kmh":N} (the car's speed, about once a
- * second: answered with nothing; moving hides the page); anything
+ * second: answered with nothing; moving hides the page),
+ * {"cmd":"ui","on":bool,"browser":bool} (the app's screen state is open: the
+ * touch screen, or with browser the page at once; off: both hidden); anything
  * else, or a command that can't run, is answered with
- * {"ev":"error","error":...}.
+ * {"ev":"error","error":...}. The touch screen's List corner sends every
+ * client {"ev":"list"}.
  */
 'use strict';
 
@@ -113,6 +116,8 @@ function startControl(opts) {
 
     return {
         broadcast: broadcast,
+        /* an event to every client (the touch screen's List corner: {"ev":"list"}) */
+        send: (obj) => clients.forEach((s) => send(s, obj)),
         close() {
             clearInterval(timer);
             clearInterval(recheck);

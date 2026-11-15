@@ -6,21 +6,28 @@
  * this screen while parked. Addresses are typed on the phone page the tool
  * serves.
  *
- * One LT_State_Wide page: the status; the phone page's link as a QR code
+ * The touch screen first: entered, the app opens its empty screen state and
+ * the tool's touch screen goes over it; its List corner, BACK or the car
+ * moving bring this page back (platform app/touch_mode).
+ *
+ * One LT_State_Wide page, all of it usable with the iDrive controller: the
+ * status; Touch screen (it again); the phone page's link as a QR code
  * (LT_Label_1Graphic_Scalable, a PNG in /dev/shm the HMI can read) and as
  * text; Show on the screen; the browser on or off; Home page, Reload, Back;
  * the page shown (title, address); what the GPU offers (the tool's probe:
  * WebGPU's adapter, WebGL 2's renderer, JSPI).
  *
- * The browser covers the app area (not the HMI's top bar or left strip). The
- * HMI still gets every touch on it (the tool reads them passively), so Show
- * first opens the screen state (ST_..._VizualyseChromiumScreen: a title and
- * a label, nothing to press) and the browser goes up once that state is
- * visible; while it is up, every button of the main page is disabled too
- * (should the screen state not open). The browser shows only while the state
- * under it is visible and focused: BACK (the arrow outside the browser),
- * HOME, another app, or an HMI pop-up taking the focus (a call, a warning)
- * hides it, so nothing of the HMI is ever covered.
+ * The tool's two pictures, the touch screen and the browser, cover the app
+ * area (not the HMI's top bar or left strip), one at a time, over the same
+ * screen state (ST_..._VizualyseChromiumScreen: a title and a label, nothing
+ * to press: the HMI still gets every touch, the tool reads them passively).
+ * The touch screen's Show on the screen swaps it for the browser, and the
+ * touch screen comes back when the browser goes while that state is open;
+ * the page's Show opens the state with the browser at once. Should the
+ * screen state not open, the picture goes over the page, every button
+ * disabled. Either shows only while the state under it is visible and
+ * focused: BACK, HOME, another app, or an HMI pop-up taking the focus (a
+ * call, a warning) hide it, so nothing of the HMI is ever covered.
  *
  * Only while parked: the app reads the car's speed once a second
  * (vehicle_speed.js) and hands it to the tool, which hides the browser above
@@ -37,22 +44,17 @@ const logging = require('oap-sdk/src/logging/logging');
 const { BrowserControl } = require('./chromium_control.js');
 const { watchSpeed } = require('./vehicle_speed.js');
 const { qrPng } = require('./qr_png.js');
+const { TouchMode } = require('./touch_mode.js');
 
 const logger = logging.getSDKLogger();
 
 const STATE_NAME = 'ST_OnlineApps_VizualyseChromium';
 const SCREEN_NAME = 'ST_OnlineApps_VizualyseChromiumScreen';
-/* how long the screen state may take to show after openState */
-const SCREEN_OPEN_MS = 3000;
 const N = {
-    status: 'browserStatus', qr: 'browserQr', link: 'browserLink', hint: 'browserHint', page: 'browserPage', gpu: 'browserGpu',
+    status: 'browserStatus', touch: 'browserTouch', qr: 'browserQr', link: 'browserLink', hint: 'browserHint', page: 'browserPage', gpu: 'browserGpu',
     show: 'browserShow', enable: 'browserEnable', home: 'browserHome', reload: 'browserReload', back: 'browserBack',
     gpuMode: 'browserGpuMode', resolution: 'browserResolution', game: 'browserGame',
 };
-/* an HMI pop-up takes the focus while the page stays visible; leaving or
- * switching states takes it too, just before 'visible' goes: wait this long
- * to tell them apart */
-const FOCUS_LOST_MS = 300;
 const PRESS_DEDUPE_MS = 400;
 const ROW_CHARS = 90;
 const QR_PX = 360;
@@ -80,10 +82,9 @@ class BrowserApp extends OnlineApp {
         super();
         this._state = null;
         this._screen = null;
-        /* per state: visible, focused (assumed with visible until told otherwise) */
-        this._st = { main: { visible: false, focused: false }, screen: { visible: false, focused: false } };
-        this._wantScreen = false;
-        this._shownOn = 'screen';
+        this._touch = null;
+        /* the page's Show: the next opening of the screen state is for the browser */
+        this._browserNext = false;
         this._components = {};
         this._actionById = {};
         this._lastPress = {};
@@ -93,7 +94,8 @@ class BrowserApp extends OnlineApp {
         this._shutdownPromise = null;
         this._qr = { key: null, file: null, chain: Promise.resolve() };
         this._control = new BrowserControl({ log: logger });
-        this._control.on('change', () => this._render());
+        this._control.on('change', () => { if (this._touch) this._touch.sync(); this._render(); });
+        this._control.on('list', () => { this._browserNext = false; if (this._touch) this._touch.list(); });
         this._stopSpeed = null;
 
         this.on('initialized', () => {
@@ -128,6 +130,7 @@ class BrowserApp extends OnlineApp {
                 if (foregroundStart) {
                     this._sawForeground = true;
                     this._setVisible(true);
+                    this._touch.entered();
                 }
                 const lastUuid = this.getLastExecutedEntryPointUuid && this.getLastExecutedEntryPointUuid();
                 return lastUuid ? this._onEntryPointExecute(lastUuid) : undefined;
@@ -161,7 +164,14 @@ class BrowserApp extends OnlineApp {
         if (missing.length) return Promise.reject(new Error('uiDescription lacks ' + missing.join(', ')));
 
         this._screen = rhmi.getByName(SCREEN_NAME);
-        if (!this._screen) logger.warn('uiDescription has no ' + SCREEN_NAME + ': Show puts the browser over the main page');
+        if (!this._screen) logger.warn('uiDescription has no ' + SCREEN_NAME + ': the touch screen and the browser go over the main page');
+        const c = this._control;
+        this._touch = new TouchMode({ rhmi: rhmi, page: this._state, screen: this._screen, log: logger,
+            tool: { connected: () => c.connected(), moving: () => c.moving(), shown: () => c.pictureUp(), hide: () => c.hideAll(),
+                /* the touch screen, or after the page's Show the browser at once */
+                show: () => { const b = this._browserNext; this._browserNext = false; return c.ui(b); } },
+            visible: (v) => this._setVisible(v) });
+        this._bind(N.touch, () => this._touch.open());
         this._bind(N.show, () => this._showBrowser());
         this._bind(N.enable, () => (this._control.enabled() ? this._control.disable() : this._control.enable()));
         this._bind(N.home, () => this._control.home());
@@ -190,79 +200,24 @@ class BrowserApp extends OnlineApp {
             this._qr.key = null;
             this._render();
         });
-        this._watchState(this._state, 'main');
-        if (this._screen) this._watchState(this._screen, 'screen');
+        this._state.on('visible', (event) => { if (isTrue(event && event.visible)) this._sawForeground = true; });
         return Promise.resolve(this._state.updateResources()).then(() => {
             logger.info('page ready: ' + names.length + ' components found');
             this._render();
         });
     }
 
-    /* visible / focus of one of the two states */
-    _watchState(state, key) {
-        state.on('visible', (event) => {
-            const visible = isTrue(event && event.visible);
-            this._st[key].visible = visible;
-            this._st[key].focused = visible;
-            if (visible) this._sawForeground = true;
-            logger.info(key + ' state ' + (visible ? 'visible' : 'hidden'));
-            if (key === 'screen' && visible && this._wantScreen) {
-                this._wantScreen = false;
-                clearTimeout(this._screenTimer);
-                this._showOn('screen');
-            }
-            this._recheck();
-        });
-        state.on('focus', (event) => {
-            this._st[key].focused = isTrue(event && event.focus);
-            this._recheck();
-        });
-    }
-
-    /* After a short wait (the HMI moves visibility and focus one event at a
-     * time): the app is visible while either state is, and the browser stays
-     * up only while the state it was shown on is visible and focused (BACK
-     * from the screen state brings the main page back: that hides it too). */
-    _recheck() {
-        clearTimeout(this._focusTimer);
-        this._focusTimer = setTimeout(() => {
-            const m = this._st.main, sc = this._st.screen;
-            this._setVisible(m.visible || sc.visible);
-            const on = this._st[this._shownOn];
-            if (!(on.visible && on.focused) && !this._wantScreen && this._control.hide()) logger.info('our page left or covered (a pop-up?): browser hidden');
-        }, FOCUS_LOST_MS);
-    }
-
-    /* Show: the screen state first, the browser once it is visible; without
-     * it (no such state, or the HMI won't open it) the browser goes over the
-     * main page, whose buttons are disabled meanwhile (_render). */
+    /* The page's Show: the screen state with the browser at once (the touch
+     * screen comes back when the browser goes, while that state is open);
+     * without it (no such state, or the HMI won't open it) the browser goes
+     * over the main page, whose buttons are disabled meanwhile (_render). */
     _showBrowser() {
-        const rhmi = this.rhmiApplication, screen = this._screen;
-        if (!screen) return this._showOn('main');
-        if (this._st.screen.visible) return this._showOn('screen');
         if (!this._control.running()) return this._control.show();   /* the tool says why */
-        this._wantScreen = true;
-        const fallback = (why) => {
-            if (!this._wantScreen) return;
-            this._wantScreen = false;
-            logger.warn('screen state: ' + why + '; the browser goes over the main page');
-            this._showOn('main');
-        };
-        clearTimeout(this._screenTimer);
-        this._screenTimer = setTimeout(() => fallback('not visible ' + SCREEN_OPEN_MS + ' ms after openState'), SCREEN_OPEN_MS);
-        if (typeof rhmi.openState !== 'function') { fallback('this SDK has no openState'); return true; }
-        const open = (arg) => Promise.resolve().then(() => rhmi.openState(arg));
-        open(screen).catch((err) => {
-            logger.info('openState(state) failed (' + (err && err.message) + '), trying its id');
-            return open(screen.getId());
-        }).catch((err) => fallback('openState failed: ' + (err && err.message)));
-        return true;
-    }
-
-    /* the browser up over one of our states ('main' or 'screen') */
-    _showOn(key) {
-        this._shownOn = key;
-        return this._control.show();
+        this._browserNext = true;
+        const r = this._touch.open();
+        /* not sent: not for the next opening either */
+        if (r === false) this._browserNext = false;
+        return r;
     }
 
     _bind(name, handler) {
@@ -306,6 +261,7 @@ class BrowserApp extends OnlineApp {
         if (this._shutdownPromise || !this.rhmiApplication || !uuid) return Promise.resolve();
         this._sawForeground = true;
         this._setVisible(true);
+        if (this._touch) this._touch.entered();
         return Promise.resolve(this.rhmiApplication.openEntryState(uuid))
             .catch((err) => logger.warn('openEntryState failed: ' + (err && err.message)));
     }
@@ -315,8 +271,8 @@ class BrowserApp extends OnlineApp {
         if (this._shutdownPromise || this._visible === visible) return;
         this._visible = visible;
         logger.info('app ' + (visible ? 'visible' : 'hidden'));
-        /* off our pages the browser must not cover whatever the HMI shows */
-        if (!visible && this._control.hide()) logger.info('app left: browser hidden');
+        /* off our pages neither picture may cover whatever the HMI shows */
+        if (!visible && this._control.hideAll()) logger.info('app left: the touch screen or the browser hidden');
         this._reportVisibilityStatus(visible);
     }
 
@@ -362,6 +318,7 @@ class BrowserApp extends OnlineApp {
         if (!this._state || this._shutdownPromise) return;
         const c = this._control, up = c.connected(), on = up && c.enabled(), run = on && c.running(), link = on ? c.link() : '';
         this._write(N.status, c.statusText());
+        this._write(N.touch, c.moving() ? 'Touch screen (only while parked)' : 'Touch screen');
         this._write(N.link, link ? link : '');
         this._write(N.hint, link ? 'Scan with the phone whose hotspot the car is on to type addresses and text' : '');
         this._write(N.page, c.pageText());
@@ -370,8 +327,10 @@ class BrowserApp extends OnlineApp {
         this._write(N.resolution, up ? c.resolutionText() : 'Resolution');
         this._write(N.gpuMode, 'GPU mode: ' + (on && c.gpuMode() ? 'on (experimental)' : 'off (WebGL on the CPU)'));
         this._write(N.game, 'Game mode: ' + (on && c.gameMode() ? 'on (trusted games only)' : 'off'));
-        /* while the browser covers the page, nothing under it can be pressed */
-        const covered = c.shown();
+        /* while a picture covers the page itself (no screen state under it: the
+         * fallback, or the phone's Show), nothing under it can be pressed */
+        const covered = this._touch ? this._touch.covered() || (c.pictureUp() && !this._touch.screenOpen()) : c.pictureUp();
+        this._setEnabled(N.touch, up && !covered && !c.moving());
         this._setEnabled(N.enable, up && !covered);
         this._setEnabled(N.show, run && !covered && !c.moving());
         this._setEnabled(N.home, run && !covered);
@@ -431,9 +390,7 @@ class BrowserApp extends OnlineApp {
         if (this._shutdownPromise) return this._shutdownPromise;
         logger.info('vizualyse_chromium shutdown: ' + JSON.stringify(reason));
         if (this._stopSpeed) this._stopSpeed();
-        clearTimeout(this._focusTimer);
-        clearTimeout(this._screenTimer);
-        this._control.hide();
+        if (this._touch) this._touch.stop(); else this._control.hideAll();
         this._control.close();
         const bundle = this.rhmiApplication && this.rhmiApplication.getResourceBundle();
         this._shutdownPromise = Promise.resolve()
