@@ -413,6 +413,8 @@ async function main() {
     await until('ui off sent on focus loss', () => uiOff() === 2, 2000);
     await until('buttons back', () => byName.browserShow.enabled === true && byName.browserHome.enabled === true);
     byName[SCREEN].emit('focus', { focus: true });
+    /* the pop-up gone: the touch screen back by itself (app/touch_mode) */
+    await until('the touch screen back after the pop-up', () => uiOn(false) === 2, 2000);
     /* shown again on the open screen state at once; a focus blip: nothing */
     await sleep(450);
     byName.browserShow.emit('action');
@@ -434,7 +436,7 @@ async function main() {
     await sleep(450);
     byName.browserTouch.emit('action');
     await until('the screen state for the touch screen', () => opened.length === 3);
-    await until('the touch screen again', () => st.touch && uiOn(false) === 2);
+    await until('the touch screen again', () => st.touch && uiOn(false) === 3);
     st = Object.assign({}, st, { moving: true, speed: 30, touch: false, touchWanted: false });
     tool.broadcast();
     await until('the page back when the car moves', () => closed.length === 2);
@@ -456,7 +458,11 @@ async function main() {
     byName[STATE].emit('focus', { focus: false });
     await until('hidden by the pop-up', () => !st.shown, 2000);
     byName[STATE].emit('focus', { focus: true });
-    console.log('ok   without the screen state the browser goes over the main page with its buttons off');
+    /* the pop-up gone: the picture back over the page; then the tool takes it down */
+    await until('back after the pop-up', () => uiOn(false) === 4, 2000);
+    st = Object.assign({}, st, { shown: false, touch: false, touchWanted: false });
+    tool.broadcast();
+    console.log('ok   without the screen state the browser goes over the main page with its buttons off; back after a pop-up');
 
     await sleep(1200);
     assert(!received.some((c) => c.cmd === 'speed'), 'no speed sent while the car gives none (65535)');

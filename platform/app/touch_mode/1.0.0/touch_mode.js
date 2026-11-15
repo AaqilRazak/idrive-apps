@@ -21,7 +21,8 @@
  *   (the HMI's). The list's first row opens the touch screen again (open()).
  * - The picture stays up only while the state it was shown on is visible and
  *   focused: BACK, HOME, another app or an HMI pop-up taking the focus (a
- *   call, a warning) hide it (hide()).
+ *   call, a warning) hide it (hide()). When a pop-up gives the focus back
+ *   to the still visible state, the picture comes back (show()).
  * - Without a screen state, or should the HMI not open it within OPEN_MS,
  *   the picture goes over the page; covered() is then true and the app
  *   disables its rows.
@@ -53,6 +54,7 @@ class TouchMode {
         this.on = 'screen';
         this.auto = 0;
         this.wasMoving = false;
+        this.popped = null;
         this.openTimer = null;
         this.settleTimer = null;
         if (o.page) this._watch(o.page, 'page');
@@ -61,6 +63,9 @@ class TouchMode {
 
     /* the picture covers the page itself (no screen state): its rows are disabled */
     covered() { return this.on === 'page' && this.o.tool.shown(); }
+
+    /* the page (the iDrive list) is in front: visible and focused */
+    pageFront() { return this.st.page.visible && this.st.page.focused; }
 
     /* the screen state is open (the touch screen, or waiting for it) */
     screenOpen() { return this.st.screen.visible || this.want; }
@@ -171,7 +176,15 @@ class TouchMode {
             const p = this.st.page, s = this.st.screen;
             if (this.o.visible) this.o.visible(p.visible || s.visible);
             const on = this.st[this.on];
-            if (!(on.visible && on.focused) && !this.want && this.o.tool.hide()) this.log.info('touch: our state left or covered (a pop-up?): picture hidden');
+            if (!(on.visible && on.focused) && !this.want && this.o.tool.hide()) {
+                this.log.info('touch: our state left or covered (a pop-up?): picture hidden');
+                /* covered while still visible: a pop-up; it comes back after */
+                this.popped = on.visible ? this.on : null;
+            } else if (this.popped && on.visible && on.focused && this.popped === this.on) {
+                this.popped = null;
+                if (this.o.tool.connected() && this.o.tool.moving() !== true) { this.log.info('touch: the pop-up went: picture back'); this._show(this.on); }
+            }
+            if (!on.visible) this.popped = null;
         }, SETTLE_MS);
     }
 }

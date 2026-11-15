@@ -33,4 +33,13 @@ no dependencies), grown from vizualyse-cluster's picker:
   a full one, hits, the host end to end. A full frame 12.7 ms and a press
   0.7 ms in Node 8 on one desktop core.
 
-Used by vizualyse-cluster 0.4.0.
+Before its first release, from the four apps that joined it: a qr's
+`matrix` compared by its content worked out once per matrix (not
+serialised each frame); a qr's white margin settable (`pad`); a disabled
+button's outline in the raised colour (it vanished on a panel card);
+`lint()` refuses a dropdown whose sheet cannot fit (more than 9 options);
+a hidden screen forgets the tap that hid it (the timing log showed
+seconds); a stopped touch reader's last lines ignored.
+
+Used by vizualyse-cluster 0.4.0, vizualyse-cast 0.4.0, vizualyse-moonlight
+0.3.0, vizualyse-steam 0.3.0 and vizualyse-chromium 0.3.0.

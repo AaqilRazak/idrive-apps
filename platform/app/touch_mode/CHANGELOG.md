@@ -11,5 +11,8 @@ the app opens its empty screen state and asks the tool for its touch
 screen; the tool's List corner (`{"ev":"list"}`), BACK or the car starting
 to move bring the page (the iDrive list) back with `closeState` (or by
 opening the page); the picture hides when its state is left or covered by a
-pop-up; without a screen state it goes over the page. Used by
-vizualyse_cluster 0.3.0.
+pop-up, and comes back when the pop-up gives the focus back; without a
+screen state it goes over the page. `pageFront()`: the page visible and
+focused. Used by vizualyse_cluster 0.3.0, vizualyse_cast 0.4.0,
+vizualyse_moonlight 0.3.0, vizualyse_steam 0.2.0 and vizualyse_chromium
+0.3.0.

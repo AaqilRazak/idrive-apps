@@ -11,7 +11,11 @@
  *     disabled), swipe (a horizontal swipe is an action), ...the kind's props }
  * Kinds: panel, text, button, seg, toggle, dropdown, sheet, tabs, status,
  * chip, image, tile, info, progress, qr, icon. A picture is passed as `img`
- * ({ w, h, rgba }) with an `imgKey` naming it (pictures are not compared).
+ * ({ w, h, rgba }) with an `imgKey` naming it (pictures are not compared:
+ * a live picture needs a new imgKey for each frame to be redrawn; set
+ * `opaque: true` on a picture known to be opaque, or the first draw scans
+ * its alpha). A qr's `matrix` is compared by its content, worked out once
+ * per matrix object: keep one per link.
  *
  * Surface.render(widgets, pressed) compares each widget with the last
  * render's by id; the rectangles of what changed (old and new place) are
@@ -121,7 +125,8 @@ const DRAW = {
         const r = d.r === undefined ? 12 : d.r;
         if (dis || style === 'quiet') {
             if (d.under !== undefined) cv.rrect(d.x, d.y, d.w, d.h, r, col(d.under));
-            cv.ring(d.x, d.y, d.w, d.h, r, 2, T.panel);
+            /* the raised colour: it shows on the ground and on a panel card */
+            cv.ring(d.x, d.y, d.w, d.h, r, 2, T.hi);
         } else {
             cv.rrect(d.x, d.y, d.w, d.h, r, style === 'primary' ? T.accent : style === 'raised' ? T.hi : T.panel);
         }
@@ -262,7 +267,9 @@ const DRAW = {
         cv.rrect(d.x, d.y, d.w, d.h, 10, T.white);
         const m = d.matrix || [];
         if (!m.length) return;
-        const n = m.length, cell = Math.floor((Math.min(d.w, d.h) - 28) / n), ox = d.x + Math.floor((d.w - n * cell) / 2), oy = d.y + Math.floor((d.h - n * cell) / 2);
+        /* d.pad: the white margin each side (the quiet zone), 14 px unless given */
+        const pad = d.pad === undefined ? 14 : d.pad;
+        const n = m.length, cell = Math.floor((Math.min(d.w, d.h) - 2 * pad) / n), ox = d.x + Math.floor((d.w - n * cell) / 2), oy = d.y + Math.floor((d.h - n * cell) / 2);
         for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (m[r][c]) cv.fill(ox + c * cell, oy + r * cell, cell, cell, T.black);
     },
 
@@ -301,9 +308,17 @@ function hit(F, widgets, x, y) {
 }
 
 /* ---- the renderer ---- */
+/* a QR matrix's text, worked out once per matrix (tools keep one per link) */
+const MATRIX_KEYS = new WeakMap();
+function matrixKey(m) {
+    if (!m || typeof m !== 'object') return '';
+    let k = MATRIX_KEYS.get(m);
+    if (k === undefined) { k = m.map((r) => r.map((c) => (c ? 1 : 0)).join('')).join('/'); MATRIX_KEYS.set(m, k); }
+    return k;
+}
 function keyOf(d, pressed) {
     const o = {};
-    Object.keys(d).forEach((k) => { if (k !== 'img') o[k] = d[k]; });
+    Object.keys(d).forEach((k) => { if (k === 'matrix') o.matrix = matrixKey(d.matrix); else if (k !== 'img') o[k] = d[k]; });
     return JSON.stringify(o) + '|' + (pressed === undefined || pressed === null ? '' : pressed);
 }
 function meets(a, b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
@@ -421,6 +436,8 @@ function lint(widgets) {
     widgets.forEach((d) => {
         if (d.x < 0 || d.y < 0 || d.x + d.w > AREA.w || d.y + d.h > AREA.h) problems.push(d.id + ' is outside the app area');
         if (d.act && (d.w < MIN_TARGET || d.h < MIN_TARGET) && d.kind !== 'tabs') problems.push(d.id + ' is smaller than ' + MIN_TARGET + ' px (' + d.w + 'x' + d.h + ')');
+        /* a dropdown's sheet must fit the app area whichever way it opens */
+        if (d.kind === 'dropdown' && 12 + d.options.length * 66 - 2 > AREA.h - 16) problems.push(d.id + ': ' + d.options.length + ' options are too many for one sheet (at most 9)');
     });
     taps.forEach((a, i) => taps.slice(i + 1).forEach((b) => { if (meets(a, b)) problems.push(a.id + ' overlaps ' + b.id); }));
     return problems;

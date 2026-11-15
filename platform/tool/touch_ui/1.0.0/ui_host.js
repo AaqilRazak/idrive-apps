@@ -126,6 +126,8 @@ class TouchScreen extends EventEmitter {
         this.pressed = null;
         this.gesture = null;
         this.ui.open = null;
+        /* a tap that hid the screen (List) has no frame to time */
+        this.tapAt = null;
         this._timing(true);
         this.log('ui: hidden' + (why ? ' (' + why + ')' : ''));
     }
@@ -186,6 +188,7 @@ class TouchScreen extends EventEmitter {
             const lines = (rest + d).split('\n');
             rest = lines.pop();
             lines.forEach((l) => {
+                if (this.touch !== p) return;   /* a reader already stopped */
                 let e;
                 try { e = JSON.parse(l); } catch (x) { return; }
                 if (e.ev === 'touch') this.onTouch(e.p, e.x, e.y);

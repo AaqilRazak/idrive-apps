@@ -827,10 +827,25 @@ https://claude.ai/artifact/S5fYduKq97f4mnRczxUpGW. Branch `app-restyle`.
   pixels (`ui: ... touches to pixels` in the tool's log) and the tool's CPU
   while a theme shows (the theme list is read once now: before, 25 times a
   second).
-- [ ] **Cast, Moonlight, Steam, Browser on the kit**: each tool draws its
-  touch screen (the artifact's layouts), each app gets a screen state and
-  `app/touch_mode`. Cast's CarPlay tab: a live preview of the map (a second,
-  small ffmpeg output, about 4 fps).
+- [ ] **Cast 0.4.0, Moonlight 0.3.0, Steam 0.3.0, Browser 0.3.0 on the car**
+  (apps 0.4.0, 0.3.0, 0.2.0, 0.3.0; all on the kit, tested off the car):
+  each opens on its touch screen; the hand-over between the touch screen
+  and the tool's own picture (Cast's this-screen stream, Moonlight's
+  console stream, Steam's game, Browser's page): mgu-render taking one
+  client closed and another opened at once (Cast and Moonlight reuse the
+  name; Steam and Browser use `<app>_ui` for the touch screen: a second
+  name from one tool is untried); Steam with Winston; Cast's CarPlay
+  preview (a second ffmpeg output, 760x370 at 4 fps, ~4.5 MB/s through
+  Node while CarPlay plays: its CPU on the Atom; `CAST_CARPLAY_PREVIEW=0`
+  turns it off); Cast's app now reads the speed (Vehicle2 in its
+  manifest: the installer has the last word).
+- [ ] **Smaller kit work** (from the four apps): `touch_mode.open()`
+  passing a wish to the tool (Steam and Browser keep a flag for "the
+  game / the page, not the touch screen"); a game-tile widget; a
+  dropdown with more than 9 options (Steam's 10 sizes are split by shape
+  today); the touch screen left up if an app dies (the tool never hears).
+  `platform/platform.js` does not run on Node 8 (`withFileTypes`): the
+  apps' `test_page.js` need it stubbed in the Node 8 container.
 - [ ] **Undecided** (the recommendation in brackets): the touch screens hide
   while the car moves and the list shows (yes, all five); the knob switching
   to the list by itself (not done: a focusable row on the screen state
