@@ -12,9 +12,13 @@
  * {"cmd":"resolution"} (the next one), {"cmd":"upscale"} (the next way of
  * scaling the picture up: off, FSR, FSR without sharpening; at once),
  * {"cmd":"speed","kmh":N} (the car's
- * speed, about once a second: answered with nothing; moving hides the game);
+ * speed, about once a second: answered with nothing; moving hides the game),
+ * {"cmd":"ui","on":bool} (the touch screen: the app's screen state is open
+ * or closed; it shows whenever the game is not up, only while parked);
  * anything else, or a command that can't run, is answered with
- * {"ev":"error","error":...}. (As vizualyse-chromium's.)
+ * {"ev":"error","error":...}. The touch screen's List corner sends
+ * {"ev":"list"} (the app goes back to its iDrive list). (As
+ * vizualyse-chromium's.)
  */
 'use strict';
 
@@ -116,6 +120,8 @@ function startControl(opts) {
 
     return {
         broadcast: broadcast,
+        /* an event to every client (the touch screen's List corner: {"ev":"list"}) */
+        send: (obj) => clients.forEach((s) => send(s, obj)),
         close() {
             clearInterval(timer);
             clearInterval(recheck);

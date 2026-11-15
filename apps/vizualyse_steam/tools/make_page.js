@@ -9,6 +9,7 @@ const T = process.argv[2];
 /* [id, type, widget, name, focusable, first text] */
 const C = [
     [20, 'label', 'LT_Label_1Row', 'steamStatus', 0, 'Connecting...'],
+    [42, 'button', 'LT_Button_1Row', 'steamTouch', 3, 'Touch screen'],
     [40, 'label', 'LT_Label_1Row', 'steamGame', 0, ''],
     [30, 'button', 'LT_Button_1Row', 'steamShow', 3, 'Show on the screen'],
     [31, 'button', 'LT_Button_1Row', 'steamStop', 3, 'Stop the game'],
@@ -32,10 +33,11 @@ let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- SPDX-License-Identifier:
 C.forEach(([id, type, widget, , focus]) => {
     xml += `            <component id="${id}" type="${type}" widget="${widget}">\n                <property id="2" value="1"/>\n                <property id="3" value="${focus}"/>\n            </component>\n`;
 });
-/* The screen state (2, ParentState 1): opened while the game covers the app
- * area. Nothing focusable or touchable on it, because the HMI still gets
- * every touch on the game and would press whatever lies under it. BACK (the
- * arrow outside the game) returns to the main page. */
+/* The screen state (2, ParentState 1): opened while the touch screen or the
+ * game covers the app area: the app opens it on entry (the touch screen),
+ * and for Show (the game). Nothing focusable or touchable on it, because the
+ * HMI still gets every touch on them and would press whatever lies under it.
+ * BACK (the arrow outside them) returns to the main page. */
 xml += '        </layoutGroup>\n    </container>\n' +
     '    <container id="2" type="state" widget="LT_State_Wide">\n        <property id="9" value="1"/>\n' +
     '        <layoutGroup id="101" name="Titlebar">\n' +
@@ -56,7 +58,7 @@ fs.writeFileSync(path.join(dir, 'uiDescription.json'),
         2: { type: 'state', name: 'ST_OnlineApps_VizualyseSteamScreen', components: {
             50: { type: 'title', name: 'steamScreenTitle', properties: vis, rows: [{ Text: { value: 'SID_STEAM_TITLE', type: 'StringId' } }] },
             51: { type: 'label', name: 'steamScreenNote', properties: Object.assign({}, vis, { Focusable: { value: 0, type: 'UInt' } }),
-                rows: [{ Text: { value: 'The game is on the screen. Back returns here.', type: 'Text' } }] },
+                rows: [{ Text: { value: 'The touch screen or the game is up. List (top right) or Back shows the list.', type: 'Text' } }] },
         } },
     } }, null, 2) + '\n');
 console.log('page: ' + C.length + ' rows');

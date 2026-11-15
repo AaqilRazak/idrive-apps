@@ -4,10 +4,13 @@
  * The app's side of the vizualyse-steam tool's control socket:
  * /dev/shm/vizualyse-steam/ctl.sock, a Unix stream socket, newline-delimited
  * JSON. The tool sends {"ev":"status", ...} on connect, after every command
- * and once a second, and {"ev":"error","error":...} for a failed command;
+ * and once a second, {"ev":"error","error":...} for a failed command and
+ * {"ev":"list"} when the touch screen's List corner is tapped (back to the list);
  * the app sends {"cmd":"enable"} / {"cmd":"disable"} (Steam on or off),
  * {"cmd":"play","appId":N}, {"cmd":"stop"} (the running game),
  * {"cmd":"show"} / {"cmd":"hide"} (the game on the central screen),
+ * {"cmd":"ui","on":bool} (the touch screen: the screen state is open or
+ * closed; the tool shows it whenever the game is not up, tool 0.3.0),
  * {"cmd":"resolution"} (the next picture size), {"cmd":"upscale"} (the next
  * way of scaling it up) and {"cmd":"speed","kmh":...}
  * (the car's speed, about once a second, for "only while parked").
@@ -43,6 +46,7 @@ class SteamControl extends EventEmitter {
         this.buf = '';
         this.status = null;
         this.lastError = null;
+        this.uiAsked = false;
     }
 
     open() {
@@ -74,6 +78,8 @@ class SteamControl extends EventEmitter {
                 try { ev = JSON.parse(line); } catch (e) { continue; }
                 if (!ev) continue;
                 if (ev.ev === 'status') { this.status = ev; this.emit('change'); }
+                /* the touch screen's List corner: back to the list */
+                else if (ev.ev === 'list') this.emit('list');
                 else if (ev.ev === 'error') {
                     this.lastError = { text: String(ev.error || 'the command failed'), at: Date.now() };
                     this.emit('change');
@@ -85,6 +91,7 @@ class SteamControl extends EventEmitter {
             if (this.sock === s) this.sock = null;
             this.buf = '';
             this.lastError = null;
+            this.uiAsked = false;
             if (this.status !== null) { this.status = null; this.emit('change'); }
             if (this.wanted && !this.timer) this.timer = setTimeout(() => this._connect(), RETRY_MS);
         });
@@ -110,6 +117,15 @@ class SteamControl extends EventEmitter {
         this.sock.write(JSON.stringify({ cmd: 'hide' }) + '\n');
         return true;
     }
+    /* the touch screen wanted (the screen state is open) or not; off only
+     * when asked for since, or the tool has it */
+    ui(on) {
+        if (!this.sock || !this.status) return false;
+        if (!on && !this.uiAsked && !this.status.ui && !this.status.uiWanted) return false;
+        this.uiAsked = !!on;
+        this.sock.write(JSON.stringify({ cmd: 'ui', on: !!on }) + '\n');
+        return true;
+    }
     speed(kmh) {
         if (!this.sock || !this.status) return false;
         this.sock.write(JSON.stringify({ cmd: 'speed', kmh: Math.round(kmh * 10) / 10 }) + '\n');
@@ -124,6 +140,8 @@ class SteamControl extends EventEmitter {
     gameState() { const g = this.status && this.status.game; return g ? g.state : null; }
     gameId() { const g = this.status && this.status.game; return g && g.state !== 'ended' ? g.appId : null; }
     shown() { return !!(this.status && this.status.shown); }
+    /* the touch screen is up */
+    uiShown() { return !!(this.status && this.status.ui); }
     moving() { return !!(this.status && this.status.moving); }
     link() { return (this.status && this.status.link) || ''; }
     library() { return (this.status && this.status.library) || []; }
@@ -149,6 +167,7 @@ class SteamControl extends EventEmitter {
         if (s.running && s.moving) return 'Only while parked - the car is moving (' + Math.round(s.speed) + ' km/h)';
         if (s.running && g.state === 'starting') return ascii('Starting ' + g.name + ' (this can take a minute)...');
         if (s.running && s.shown) return 'On the screen - the back arrow on the left returns here';
+        if (s.ui) return 'The touch screen is up - List (top right) or the back arrow returns here';
         if (s.running) return ascii(g.name + ' is running - Show puts it on the screen');
         if (s.restartNote) return ascii('Note: ' + s.restartNote);
         if (!s.library.length) return 'No games yet - scan the QR code to sign in to Steam and install one';

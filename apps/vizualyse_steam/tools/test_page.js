@@ -12,10 +12,15 @@
  *
  * Covers: application.xml and uiDescription.json agree, the app binds every
  * button, its UUIDs are its own; with no tool the status says so and the
- * buttons are off; connected, the link as a QR PNG, a Play button per game
- * (four at most; none without a program); Play sends play, and once the game
- * draws the empty screen state opens and show goes; BACK and a pop-up hide it
- * (it keeps running), Show opens the screen state again, Stop sends stop; a
+ * buttons are off; entered with the tool there and parked, the touch screen
+ * opens by itself (the empty screen state, then ui once it is visible); its
+ * List corner ({"ev":"list"}) closes the state to the page; connected, the
+ * link as a QR PNG, a Play button per game (four at most; none without a
+ * program); Play sends play, and once the game draws the empty screen state
+ * opens, show goes, then ui (the touch screen for when the game goes); BACK
+ * and a pop-up hide both (the game keeps running; the touch screen unwanted
+ * first), Show opens the screen state again, Stop sends stop; Touch screen
+ * opens it again; the car moving closes it to the page; a
  * game ending before it draws shows its note and nothing; the download row;
  * Picture; out of memory; the speed and "only while parked"; the restart
  * note; a failed command's error; installing; on / off; a new link's QR; the
@@ -101,6 +106,13 @@ rhmi.openState = (st) => {
     setImmediate(() => { byName[STATE].emit('visible', { visible: false }); st.emit('visible', { visible: true }); });
     return Promise.resolve();
 };
+/* closeState: the state goes, the main state comes */
+const closed = [];
+rhmi.closeState = (st) => {
+    closed.push(st);
+    setImmediate(() => { st.emit('visible', { visible: false }); byName[STATE].emit('visible', { visible: true }); });
+    return Promise.resolve();
+};
 rhmi.getResourceBundle = () => bundle;
 rhmi.flush = () => Promise.resolve();
 
@@ -182,6 +194,7 @@ function startFakeTool(opts) {
     server.listen(PIPE);
     return {
         broadcast() { clients.forEach((x) => send(x, status())); },
+        event(obj) { clients.forEach((x) => send(x, obj)); },
         clients() { return clients.size; },
         close() { clients.forEach((x) => x.destroy()); server.close(); },
     };
@@ -205,14 +218,16 @@ function serve() {
     tool = startFakeTool({ status: () => st, command: (c) => {
         received.push(c);
         if (c.cmd === 'speed') return null;
-        if (c.cmd === 'show') st = Object.assign({}, st, { shown: true });
-        if (c.cmd === 'hide') st = Object.assign({}, st, { shown: false });
+        /* the tool keeps one picture up: the game, or the touch screen while it is wanted */
+        if (c.cmd === 'show') st = Object.assign({}, st, { shown: true, ui: false });
+        if (c.cmd === 'hide') st = Object.assign({}, st, { shown: false, ui: !!st.uiWanted });
+        if (c.cmd === 'ui') st = Object.assign({}, st, { uiWanted: !!c.on, ui: !!c.on && !st.shown });
         const r = refuse; refuse = null; return r;
     } });
 }
 const sent = (cmd) => received.some((c) => c.cmd === cmd);
-const count = (cmd) => received.filter((c) => c.cmd === cmd).length;
-const BUTTONS = ['steamShow', 'steamStop', 'steamPlay1', 'steamPlay2', 'steamPlay3', 'steamPlay4', 'steamResolution', 'steamUpscale', 'steamEnable'];
+const count = (cmd, f) => received.filter((c) => c.cmd === cmd && (!f || f(c))).length;
+const BUTTONS = ['steamTouch', 'steamShow', 'steamStop', 'steamPlay1', 'steamPlay2', 'steamPlay3', 'steamPlay4', 'steamResolution', 'steamUpscale', 'steamEnable'];
 
 async function main() {
     const comps = UI.containers['1'].components;
@@ -248,16 +263,32 @@ async function main() {
 
     process.exit = (code) => { throw new Error('process.exit(' + code + ')'); };
     runSource();
+    /* the HMI shows the entry state */
+    setTimeout(() => byName[STATE].emit('visible', { visible: true }), 50);
     const S = byName.steamStatus, G = byName.steamGame, D = byName.steamDownload;
     await until('no-tool status', () => /not running/.test(S.text || ''));
     assert(!logs.some((l) => /^error/.test(l)), logs.filter((l) => /^error/.test(l)).join('\n'));
-    ['steamShow', 'steamStop', 'steamResolution', 'steamUpscale', 'steamEnable'].forEach((n) => assert.strictEqual(byName[n].enabled, false, n + ' disabled'));
+    assert.strictEqual(byName.steamTouch.text, 'Touch screen');
+    ['steamTouch', 'steamShow', 'steamStop', 'steamResolution', 'steamUpscale', 'steamEnable'].forEach((n) => assert.strictEqual(byName[n].enabled, false, n + ' disabled'));
     ['steamPlay1', 'steamPlay2', 'steamPlay3', 'steamPlay4'].forEach((n) => assert.strictEqual(byName[n].visible, false, n + ' hidden'));
     assert.strictEqual(byName.steamEnable.text, 'Steam: not running');
     assert.strictEqual(byName.steamQr.visible, false);
     console.log('ok   without the tool: "' + S.text + '", buttons off, no Play buttons, no QR');
 
     serve();
+    /* entered with the tool there: the touch screen by itself; its List corner: the page */
+    await until('the screen state opened by itself', () => opened.length === 1 && opened[0] === byName[SCREEN]);
+    await until('the touch screen asked for', () => count('ui', (c) => c.on === true) === 1 && st.ui === true);
+    await until('status: the touch screen', () => /^The touch screen is up/.test(S.text || ''));
+    assert(!sent('show'), 'not the game');
+    st = Object.assign({}, st, { ui: false, uiWanted: false });
+    tool.event({ ev: 'list' });
+    tool.broadcast();
+    await until('the page back on List', () => closed.length === 1 && closed[0] === byName[SCREEN]);
+    await sleep(600);
+    assert.strictEqual(opened.length, 1, 'the touch screen does not come back by itself after List');
+    console.log('ok   entered: the touch screen opens by itself (screen state, then ui); its List corner closes it to the page');
+
     await until('ready status', () => S.text === 'Ready - pick a game');
     assert.strictEqual(byName.steamLink.text, LINK1);
     assert(/^Scan with the phone/.test(byName.steamHint.text));
@@ -284,23 +315,28 @@ async function main() {
     assert.strictEqual(G.text, 'Slay the Spire 2: starting');
     st = Object.assign({}, st, { game: GAME('running') });
     tool.broadcast();
-    await until('the screen state opened by itself', () => opened.length === 1 && opened[0] === byName[SCREEN]);
+    await until('the screen state opened by itself', () => opened.length === 2 && opened[1] === byName[SCREEN]);
     await until('show sent once it is visible', () => sent('show'));
-    await until('shown', () => /^On the screen/.test(S.text || ''));
-    await until('every button off while covered', () => BUTTONS.every((n) => byName[n].enabled === false || byName[n].visible === false));
+    await until('then the touch screen wanted, for when the game goes', () => count('ui', (c) => c.on === true) === 2);
+    const order = received.filter((c) => c.cmd === 'show' || c.cmd === 'ui').map((c) => c.cmd + (c.on === undefined ? '' : ':' + c.on));
+    assert.deepStrictEqual(order.slice(-2), ['show', 'ui:true'], 'the game first, then the touch screen wanted (it stays down under the game)');
+    await until('shown', () => /^On the screen/.test(S.text || '') && st.shown && !st.ui);
     assert.strictEqual(G.text, 'Slay the Spire 2: 28 pictures/s');
-    console.log('ok   Play sends play; "starting"; once it draws the empty screen state opens and the game shows; buttons off while covered');
+    console.log('ok   Play sends play; "starting"; once it draws the empty screen state opens, show, then ui (the touch screen under the game)');
 
     /* BACK: hidden, still running; Show again opens the screen state; Stop */
     byName[SCREEN].emit('visible', { visible: false });
     byName[STATE].emit('visible', { visible: true });
     await until('hide on BACK', () => count('hide') === 1, 1500);
+    const back = received.filter((c) => c.cmd === 'hide' || c.cmd === 'ui').map((c) => c.cmd + (c.on === undefined ? '' : ':' + c.on));
+    assert.deepStrictEqual(back.slice(-2), ['ui:false', 'hide'], 'the touch screen unwanted before the game hides (else it would come back over the page)');
+    assert(!st.ui && !st.shown, 'neither picture up');
     await until('running, hidden', () => S.text === 'Slay the Spire 2 is running - Show puts it on the screen' && byName.steamShow.enabled === true);
     await sleep(600);
     assert.strictEqual(count('show'), 1, 'hidden by BACK, not shown again by itself');
     await sleep(450);
     byName.steamShow.emit('action');
-    await until('the screen state again', () => opened.length === 2);
+    await until('the screen state again', () => opened.length === 3);
     await until('shown again', () => st.shown);
     byName[SCREEN].emit('focus', { focus: false });
     await until('hide on a pop-up', () => count('hide') === 2, 2000);
@@ -315,6 +351,22 @@ async function main() {
     tool.broadcast();
     await until('ended', () => G.text === 'Slay the Spire 2 ended: stopped on the iDrive page' && byName.steamPlay1.text === 'Play: Slay the Spire 2' && byName.steamPlay1.enabled);
     console.log('ok   BACK and a pop-up hide it (it keeps running); Show opens the screen state again; Stop sends stop');
+
+    /* Touch screen: the screen state and the touch screen again; the car moving: the page */
+    await sleep(450);
+    byName.steamTouch.emit('action');
+    await until('the screen state for the touch screen', () => opened.length === 4 && opened[3] === byName[SCREEN]);
+    await until('the touch screen up', () => st.ui === true && count('ui', (c) => c.on === true) === 4);
+    st = Object.assign({}, st, { moving: true, speed: 30, ui: false, uiWanted: false });
+    tool.broadcast();
+    await until('the page back when the car moves', () => closed.length === 2 && closed[1] === byName[SCREEN]);
+    await until('Touch screen off while moving', () => byName.steamTouch.enabled === false && byName.steamTouch.text === 'Touch screen (only while parked)');
+    st = Object.assign({}, st, { moving: false, speed: 0 });
+    tool.broadcast();
+    await until('Touch screen on again', () => byName.steamTouch.enabled === true && byName.steamTouch.text === 'Touch screen');
+    await sleep(600);
+    assert.strictEqual(opened.length, 4, 'not back by itself after the move');
+    console.log('ok   Touch screen opens it again; the car moving closes it to the page (the row off while moving)');
 
     /* Play, but the game ends before it draws: no screen state */
     const before = opened.length;
@@ -437,7 +489,7 @@ async function main() {
     assert.strictEqual(tool.clients(), 1, 'the socket stays open with the page hidden');
     assert(count('speed') > n, 'the speed goes on with the page hidden');
     byName[STATE].emit('visible', { visible: true });
-    assert(!received.some((c) => !/^(speed|show|hide|play|stop|resolution|upscale|enable|disable)$/.test(c.cmd)), 'nothing else sent');
+    assert(!received.some((c) => !/^(speed|show|hide|ui|play|stop|resolution|upscale|enable|disable)$/.test(c.cmd)), 'nothing else sent');
     tool.close();
     await until('tool gone', () => /not running/.test(S.text || ''));
     assert.strictEqual(byName.steamEnable.enabled, false);

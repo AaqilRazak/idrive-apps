@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0
+
+- **Opens on the touch screen** (the Steam tool's, 0.3.0) while parked: the
+  running game with Show on the screen and Stop the game, the library four
+  games a page, the download, and Settings (the picture's shape and size,
+  Upscaling, Steam on / off, the phone page's QR code). Its **List** button
+  (top right), BACK or the car starting to move bring this page back; the
+  new first row, **Touch screen**, opens it again.
+- Show (here or on the touch screen) puts the game in the touch screen's
+  place over the same screen state; when the game stops or is hidden, the
+  touch screen comes back while that state is open.
+
 ## 0.1.3
 
 - **Upscaling** button under Picture: off (Winston enlarges the picture),

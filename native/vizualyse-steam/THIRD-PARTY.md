@@ -6,6 +6,13 @@ permissive notice (in the file); it, `src/frame_out.*` and `src/pcm_play.py` are
 copies of platform modules (native/wayland_drm, native/frame_out,
 tool/pcm_play; those two ours, GPL-3.0-or-later).
 
+The touch screen's kit (`ui_*.js`, `touch_reader.py`, the platform's
+tool/touch_ui) is ours, GPL-3.0-or-later; its glyph atlases (`ui.*.font.gz`)
+are pictures drawn with **Barlow Semi Condensed** (The Barlow Project
+Authors, SIL Open Font License 1.1); no font file ships. `qrcode.js` (the
+platform's common/qrcode) is Kazuhiko Arase's QR Code Generator, MIT (its
+notice in the file).
+
 `src/fsr.c` (in `wl-sink`) ports the shaders of **AMD FidelityFX Super
 Resolution 1** (`ffx_fsr1.h`, `ffx_a.h` from
 <https://github.com/GPUOpen-Effects/FidelityFX-FSR>: EASU and RCAS, 32-bit)
