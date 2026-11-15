@@ -39,7 +39,7 @@
           "rows": [
             {
               "Text": {
-                "value": "Connecting…",
+                "value": "Connecting...",
                 "type": "Text"
               }
             }
@@ -101,6 +101,28 @@
             {
               "Text": {
                 "value": "",
+                "type": "Text"
+              }
+            }
+          ]
+        },
+        "24": {
+          "type": "button",
+          "name": "moonlightTouch",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "Touch screen",
                 "type": "Text"
               }
             }
@@ -255,6 +277,52 @@
             {
               "Text": {
                 "value": "",
+                "type": "Text"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "2": {
+      "type": "state",
+      "name": "ST_OnlineApps_VizualyseMoonlightScreen",
+      "components": {
+        "50": {
+          "type": "title",
+          "name": "moonlightScreenTitle",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "SID_MOONLIGHT_TITLE",
+                "type": "StringId"
+              }
+            }
+          ]
+        },
+        "51": {
+          "type": "label",
+          "name": "moonlightScreenNote",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 0,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "The touch screen is up. List (top right) or Back shows the list.",
                 "type": "Text"
               }
             }

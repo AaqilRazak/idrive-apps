@@ -3,7 +3,7 @@
 /* A stand-in for mgu-render's client (mgu_render_client.js) in the off-car
  * tests: it says ready with a 1920x720 screen and an app area, and notes
  * what it is asked to draw in MOONLIGHT_TEST_RENDER_LOG (the draw ops each
- * time they change). */
+ * time they change, the area of each pixels upload). */
 'use strict';
 const EventEmitter = require('events');
 const fs = require('fs');
@@ -21,7 +21,12 @@ class RenderClient extends EventEmitter {
     show(on) { note('show ' + on); }
     claim(r) { note('claim ' + JSON.stringify(r)); }
     pixmap(id, w, h, f) { note('pixmap ' + id + ' ' + w + 'x' + h + ' ' + f); }
-    pixels(id) { note('pixels ' + id); }
+    /* the area sent; the newest whole picture of the pixmap to <log>.<id>.rgba (the touch screen's) */
+    pixels(id, rects, data) {
+        const area = (rects || []).reduce((a, r) => a + r.w * r.h, 0);
+        if (LOG && data && data.length > 4 * 4 * 4) fs.writeFileSync(LOG + '.' + id + '.rgba', data);
+        note('pixels ' + id + ' ' + area);
+    }
     /* each new list of ops (not every frame) */
     frameWords(u32) {
         const ops = Array.from(u32).filter((v, i) => i % 7 === 0).join(',');

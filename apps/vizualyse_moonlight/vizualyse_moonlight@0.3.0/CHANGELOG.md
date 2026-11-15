@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- The touch screen first: opening the app opens Moonlight's touch screen by
+  itself (while parked): the phone page's QR code, the stream with Stop,
+  Quit game and Resume last, Picture on, on / off, and an Info tab. Its List
+  button (top right), BACK or the car starting to move bring this list
+  back; the list's new first row, Touch screen, opens it again (platform
+  app/touch_mode). A stream on the centre console hides it until it ends.
+- The page's texts are plain ASCII (they had dashes and a dot the HMI may
+  not have); "only while parked" says the speed in mph.
+- Needs vizualyse-moonlight 0.3.0.
+
 ## 0.2.1
 
 - No change to the page: its shared files (the QR code, the car's speed) now
