@@ -49,6 +49,7 @@
     { "path": "usb.js", "from": "src/usb.js", "mode": "0644" },
     { "path": "steam.js", "from": "src/steam.js", "mode": "0644" },
     { "path": "steamstub.js", "from": "src/steamstub.js", "mode": "0644" },
+    { "path": "client.js", "from": "src/client.js", "mode": "0644" },
     { "path": "game.js", "from": "src/game.js", "mode": "0644" },
     { "path": "perf.js", "from": "src/perf.js", "mode": "0644" },
     { "path": "wine_log.js", "from": "src/wine_log.js", "mode": "0644" },

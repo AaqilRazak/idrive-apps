@@ -18,7 +18,7 @@
  *
  *   Settings  [Shape: 16:9 | the screen's]  [Picture size v]     +-----------+
  *             Upscaling [Off | FSR | FSR, no sharpening]        | Phone page|
- *                                                               |   (QR)    |
+ *             [Steam client                          (off) ]    |   (QR)    |
  *             [Steam                                  (on) ]    |  link     |
  *                                                               +-----------+
  *
@@ -28,7 +28,8 @@
  * running, moving, library [{ appId, name, playable, why }], page,
  * download (null, or { text, percent: 0..100 while downloading }),
  * resolution, upscale, resolutions [{ id, short, shape }], link, qr (the
- * link's modules, or null).
+ * link's modules, or null), client ({ on, installed, account, step, note }:
+ * the Steam client setting, client.js).
  *
  * Game tiles are plain colour plates (no cover art: the tool would have to
  * download and convert pictures while Steam installs games).
@@ -123,6 +124,14 @@ function library(m, chipW) {
 /* a resolution's shape: 16:9, or the screen's (2.8:1) */
 function shapeOf(m, id) { const r = (m.resolutions || []).filter((x) => x.id === id)[0]; return r ? r.shape : '16:9'; }
 
+/* the Steam client toggle's line: what it means, or where it is */
+function clientSub(c) {
+    if (c.step) return c.step;
+    if (!c.on) return 'off: games start by themselves (light). On: in Steam\'s own client, for Steam DRM (~2 GB)';
+    if (c.account) return 'on: games start in Steam\'s client, signed in as ' + c.account;
+    return c.note || (c.installed ? 'on: not signed in yet: turn it off and on to sign in' : 'on: not installed yet');
+}
+
 function settings(m) {
     const b = [], shape = shapeOf(m, m.resolution), off = !m.enabled;
     const sizes = (m.resolutions || []).filter((r) => r.shape === shape).map((r) => ({ v: r.id, l: r.short }));
@@ -132,6 +141,9 @@ function settings(m) {
     b.push({ id: 'res', kind: 'dropdown', x: 624, y: 36, w: 666, h: 80, act: true, on: !off, label: 'Picture size', value: m.resolution, options: sizes });
     b.push({ id: 'upLabel', kind: 'text', x: 0, y: 140, w: 1290, h: 30, font: 'f20', colour: 'dim', text: 'Upscaling (a smaller picture enlarged to the screen; at once)' });
     b.push({ id: 'upscale', kind: 'seg', x: 0, y: 176, w: 1290, h: 80, act: true, on: !off, value: m.upscale, options: UPSCALES });
+    const c = m.client || {};
+    b.push({ id: 'client', kind: 'toggle', x: 0, y: 284, w: 1290, h: 80, act: true, on: !off, value: !!c.on,
+        label: 'Steam client', sub: clientSub(c) });
     b.push({ id: 'enabled', kind: 'toggle', x: 0, y: 382, w: 1290, h: 80, act: true, value: !!m.enabled,
         label: 'Steam', sub: m.enabled ? 'on: games and downloads run, the phone page is open' : 'off: no game, no download, no phone page' });
     b.push({ id: 'qrCard', kind: 'panel', x: QR.x, y: 0, w: QR.w, h: 462 });

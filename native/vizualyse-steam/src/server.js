@@ -43,6 +43,7 @@ const env = require('./env.js');
 const unpack = require('./unpack.js');
 const steam = require('./steam.js');
 const steamstub = require('./steamstub.js');
+const client = require('./client.js');
 const { Game } = require('./game.js');
 const { Speakers } = require('./speakers.js');
 const usb = require('./usb.js');
@@ -525,6 +526,7 @@ function touchLine() {
     if (mem.note && mem.oomAt && Date.now() - Date.parse(mem.oomAt) < 120000) {
         return { tone: 'warn', text: 'Out of memory: the game needed more than ' + settings.memMb + ' MB (phone page: Memory)' };
     }
+    if (clientState.step) return { tone: 'live', text: 'Steam client: ' + clientState.step };
     if (g && moving()) return { tone: 'warn', text: 'The game shows only while parked: the car is moving' };
     if (g && g.state === 'starting') return { tone: 'live', text: 'Starting ' + g.o.name + ' (this can take a minute)...' };
     if (g) return { tone: 'ok', text: g.o.name + ' is running. Show puts it on the screen' };
@@ -576,6 +578,7 @@ function touchModel() {
         game: g ? { appId: g.o.appId, name: g.o.name, state: g.state, fps: g.stats.fps, gpuBuffers: !!g.gpuBuffers, note: g.note, shown: screen.shown() } : null,
         running: live, moving: moving(), library: touchLibrary(), download: touchDownload(),
         resolution: settings.resolution, upscale: settings.upscale, resolutions: RES_TOUCH, link: settings.enabled ? linkNow : null,
+        client: clientStatus(),
     };
 }
 
@@ -591,6 +594,7 @@ const touchUi = new SteamTouch({
         resolution: (id) => setResolution(id),
         upscale: (id) => setUpscale(id),
         enable: (on) => { setEnabled(!!on); return null; },
+        client: (on) => clientSetting(on),
     },
 });
 touchUi.on('change', () => { if (control) control.broadcast(); });
@@ -1061,6 +1065,20 @@ function play(appId) {
     let missing;
     try { missing = env.gpuLibs(); } catch (e) { return 'the GPU libraries: ' + e.message; }
     if (missing.length) return 'this unit has no ' + missing.join(', ');
+    /* the Steam client setting: the game starts in Steam's own client, signed in */
+    const viaClient = !!settings.client;
+    if (viaClient) {
+        if (!client.installed(env.PREFIX) || !client.account(env.PREFIX)) {
+            const e = clientEnsure();
+            return e || 'the Steam client is not signed in yet: ' + (clientStep() || 'sign in on the car\'s screen');
+        }
+        try {
+            const r = client.register(env.PREFIX, appId, g.name, g.dir, UID, UID);
+            if (r !== 'kept') log('client: ' + g.name + ' ' + r);
+        } catch (e) { return 'the Steam client\'s library: ' + e.message; }
+        const re = clientRoots();
+        if (re) return re;
+    }
     const chosen = RESOLUTIONS.filter((r) => r.id === settings.resolution)[0];
     ensureInterfaces(g);
     const min = steam.minScreen(g.dir, g.exe);
@@ -1081,11 +1099,22 @@ function play(appId) {
     const args = (vulkan ? vulkanArgs(g) : (g.args || [])).concat(extra);
     if (detail !== 'normal') log('detail: ' + g.name + ' ' + detail + (extra.length ? ': ' + extra.join(' ') : '') +
         (vulkan ? ' (DXVK: ' + env.DETAIL_DXVK[detail].join(', ') + ')' : ' (WineD3D: ' + env.DETAIL_WINED3D[detail] + ')'));
-    const x = new Game({ appId: appId, name: g.name, dir: g.dir, exe: g.exe, args: args, launch: launch, detail: detail,
+    const x = new Game({ appId: appId, name: g.name, dir: viaClient ? client.dirOf(env.PREFIX) : g.dir, exe: viaClient ? client.exeOf(env.PREFIX) : g.exe,
+        args: viaClient ? client.playArgs(appId, args) : args, launch: launch, detail: detail,
         frame: { w: res.w, h: res.h }, fps: settings.fps, fsr: upscaleArg(), upscale: settings.upscale, uid: UID, gid: VIDEO_GID, cgroup: cgroupDir,
         sound: settings.sound, volume: () => settings.volume, speakers: speakers, log: log,
         vulkan: vulkan, iris: iris, engine: g.engine, crumbsFd: vulkan ? vulkanCrumbs : undefined,
-        output: Array.isArray(g.output) ? g.output : undefined });
+        output: Array.isArray(g.output) ? g.output : undefined,
+        client: viaClient, ended: () => (x.clientWhy || null) });
+    if (viaClient) {
+        clientWatchGame(x, g.exe);
+        /* signed out after all (the token gone): its sign-in on the screen, the game after it */
+        x.on('toplevel', (t) => {
+            if (!/^Sign in to Steam/.test(t.title || '') || game !== x) return;
+            clientNote('the Steam client asks to sign in again: its QR code is on the screen');
+            if (!moving()) show();
+        });
+    }
     log('vulkan: ' + g.name + (vulkan ? ' on Vulkan (' + env.vulkanLabel() + ')' + (args.join(' ') !== (g.args || []).join(' ') ? ', ' + args.join(' ') : '')
         : ' on OpenGL (WineD3D, ' + (iris ? env.irisLabel() : 'the unit\'s i965') + ')') + ' (' + (g.vulkan === true || g.vulkan === false ? 'chosen' : 'the default for ' + (gameArch(g) || 'an unknown') + ' program') + ')');
     game = x;
@@ -1144,9 +1173,190 @@ function play(appId) {
 function stopGame(why) {
     if (!game || game.state === 'ended') return 'no game is running';
     hide('the game is stopping');
-    game.stop(why || 'stopped');
+    if (game.o.client) clientShutdown(game, why || 'stopped');
+    else game.stop(why || 'stopped');
     return null;
 }
+
+/* ---- Steam's own client (client.js): the "Steam client" setting -------------------------- */
+
+/* where it is: null (nothing under way), or what is happening */
+const clientState = { step: null, note: null };
+function clientStep() { return clientState.step; }
+function clientNote(s) { clientState.note = s; log('client: ' + s); touchUi.refresh(); if (control) control.broadcast(); }
+function clientSet(step) { clientState.step = step; touchUi.refresh(); if (control) control.broadcast(); }
+
+/* what the client needs next, started: installed, then signed in. An error string or null */
+function clientEnsure() {
+    if (!settings.enabled) return 'the tool is off';
+    if (bundle.state !== 'ready' || !launch) return 'the tool is still installing itself';
+    if (clientState.step) return null;
+    if (game && game.state !== 'ended') return 'a game is running: the Steam client is made ready after it';
+    if (!client.installed(env.PREFIX)) return clientInstall();
+    if (!client.account(env.PREFIX)) return clientSignIn();
+    return null;
+}
+
+function clientSetting(on) {
+    settings.client = !!on;
+    saveSettings();
+    log('settings: Steam client ' + (on ? 'on: games start in Steam\'s own client' : 'off: games start by themselves (the lightweight mode)'));
+    clientState.note = null;
+    if (on) { const e = clientEnsure(); if (e) clientNote(e); }
+    touchUi.refresh();
+    if (control) control.broadcast();
+    return null;
+}
+
+/* a session of Steam's client in the prefix (the installer, the sign-in) as a Game:
+ * shown on the screen once it draws (the sign-in's QR code), then(x) when it ends */
+/* the runtime's root certificates in the prefix to stay (client.importRoots), before
+ * each start of the client (no Wine runs then): Wine prunes what the unit lacks */
+function clientRoots() {
+    try {
+        const n = client.importRoots(env.PREFIX, path.join(env.RUNTIME, 'etc', 'ssl', 'certs', 'ca-certificates.crt'));
+        if (n) log('client: ' + n + ' root certificates into the prefix (the unit has only BMW\'s)');
+        const a = client.autoLogin(env.PREFIX);
+        if (a) log('client: ' + a + ' signs in by itself again (AutoLoginUser)');
+        return null;
+    } catch (e) { return 'the root certificates: ' + e.message; }
+}
+
+function clientSession(name, dir, exe, args, then) {
+    let missing;
+    try { missing = env.gpuLibs(); } catch (e) { return 'the GPU libraries: ' + e.message; }
+    if (missing.length) return 'this unit has no ' + missing.join(', ');
+    const re = clientRoots();
+    if (re) return re;
+    try { userDir(env.HOME); writeDns(); } catch (e) { return e.message; }
+    cgroupDir = cgroup();
+    const x = new Game({ appId: 0, name: name, dir: dir, exe: exe, args: args, launch: launch, detail: 'normal',
+        frame: { w: 1280, h: 720 }, fps: settings.fps, fsr: 'off', upscale: 'off', uid: UID, gid: VIDEO_GID, cgroup: cgroupDir,
+        sound: false, volume: () => settings.volume, log: log, vulkan: false, iris: false, engine: null,
+        client: true, ended: () => (x.clientWhy || null) });
+    game = x;
+    let shownOnce = false;
+    x.on('state', (st) => {
+        if (st === 'running' && !shownOnce && game === x) { shownOnce = true; if (!moving()) show(); }
+        if (st === 'ended') {
+            if (game === x) hide('the Steam client\'s session ended');
+            clientSet(null);
+            if (then) then(x);
+        }
+        touchUi.onGame(x);
+        touchUi.refresh();
+        if (control) control.broadcast();
+    });
+    x.start();
+    return null;
+}
+
+/* the installer (SteamSetup.exe, Valve's, through the phone), the prefix's root certificates, then the sign-in */
+function clientInstall() {
+    const dns = phoneDns()[0];
+    if (!dns) return 'no phone connected: the Steam client is downloaded through its hotspot';
+    clientSet('downloading the Steam client\'s installer');
+    const tmp = path.join(env.HOME, 'tmp', 'SteamSetup.exe');
+    try { userDir(path.join(env.HOME, 'tmp')); writeDns(); } catch (e) { clientSet(null); return e.message; }
+    client.fetchInstaller(dns, UID, UID, tmp, (err) => {
+        if (err) { clientSet(null); clientNote('the installer: ' + err); return; }
+        if (game && game.state !== 'ended') { clientSet(null); clientNote('a game started: the Steam client is installed after it'); return; }
+        try {
+            const into = path.join(env.PREFIX, 'pfx', 'drive_c', 'SteamSetup.exe');
+            fs.copyFileSync(tmp, into);
+            fs.chownSync(into, UID, UID);
+            fs.unlinkSync(tmp);
+        } catch (e) { clientSet(null); clientNote('installing: ' + e.message); return; }
+        clientSet('installing the Steam client');
+        const e = clientSession('Steam client (installing)', path.join(env.PREFIX, 'pfx', 'drive_c'), 'SteamSetup.exe', ['/S', '/D=' + client.WIN_DIR], () => {
+            try { fs.unlinkSync(path.join(env.PREFIX, 'pfx', 'drive_c', 'SteamSetup.exe')); } catch (e2) { /* gone */ }
+            if (!client.installed(env.PREFIX)) { clientNote('the installer ended without installing it'); return; }
+            log('client: installed in ' + client.WIN_DIR);
+            const e3 = clientSignIn();
+            if (e3) clientNote(e3);
+        });
+        if (e) { clientSet(null); clientNote(e); }
+    });
+    return null;
+}
+
+/* the client on the screen to sign in (the QR code for the Steam app, or the
+ * account's name and password on the touch screen's keyboard-less pointer:
+ * the QR code is the way); its first start also updates it (~250 MB). It ends
+ * itself once the account is signed in and remembered. */
+function clientSignIn() {
+    if (moving()) return 'sign in to the Steam client while parked (its QR code is shown on the screen)';
+    const from = client.logSize(env.PREFIX);
+    clientSet('signing in: scan the QR code on the screen with the Steam app');
+    let watch = null;
+    const e = clientSession('Steam client', client.dirOf(env.PREFIX), client.exeOf(env.PREFIX), client.signInArgs(), () => {
+        if (watch) clearInterval(watch);
+        const a = client.account(env.PREFIX);
+        clientNote(a ? 'signed in as ' + a.persona : 'not signed in: turn the Steam client setting on again to sign in');
+    });
+    if (e) { clientSet(null); return e; }
+    const x = game;
+    watch = setInterval(() => {
+        if (x.state === 'ended') { clearInterval(watch); return; }
+        if (client.loggedOnSince(env.PREFIX, from) && client.account(env.PREFIX)) {
+            clearInterval(watch);
+            log('client: signed in as ' + client.account(env.PREFIX).persona);
+            setTimeout(() => clientShutdown(x, 'signed in'), 5000);
+        }
+    }, 2000);
+    return null;
+}
+
+/* the client asked to end (its web UI let go on first, so it can), then made to */
+function clientShutdown(x, why) {
+    if (x.state === 'ended') return;
+    /* asked again while it ends: at once */
+    if (x.clientWhy !== undefined) { x.stop(why || x.clientWhy); return; }
+    x.clientWhy = why;
+    if (x.clientTimer) clearInterval(x.clientTimer);
+    client.thaw(x.o.cgroup, UID);
+    if (x.wineEnv) {
+        const e = Object.assign({}, x.wineEnv), libs = e.LD_LIBRARY_PATH;
+        delete e.LD_LIBRARY_PATH;
+        const argv = x.o.launch.argv.slice(0, 2).concat([path.join(client.dirOf(env.PREFIX), client.exeOf(env.PREFIX)), '-shutdown']);
+        try {
+            spawn('/bin/sh', ['-c', 'LD_LIBRARY_PATH=' + libs + ' exec "$0" "$@"'].concat(argv), { env: e, cwd: client.dirOf(env.PREFIX), uid: UID, gid: VIDEO_GID, stdio: 'ignore' })
+                .on('error', () => { /* the timer ends it */ });
+        } catch (e2) { /* the timer ends it */ }
+    }
+    setTimeout(() => { if (x.state !== 'ended') x.stop(why); }, 15000);
+}
+
+/* a game started in the client: its web UI frozen once the game runs (its
+ * memory goes to swap under the cap), the session ended when the game does */
+const NOT_THE_GAME = /^(steam|steamwebhelper|steamservice|steamerrorreporter(64)?|gameoverlayui(64)?|steamsysinfo|gldriverquery(64)?|vulkandriverquery(64)?|services|winedevice|plugplay|explorer|rpcss|svchost|tabtip|conhost|start|wineboot|rundll32|reg|cmd|iscriptevaluator)\.exe$/;
+const AN_INSTALLER = /setup|install|redist|dxsetup|pbsvc|punkbuster|dotnet|vc_?redist|oalinst|physx/i;
+function clientWatchGame(x, exe) {
+    let seenAt = null, goneFor = 0, frozen = false;
+    const want = path.basename(String(exe).split('\\').join('/')).toLowerCase();
+    x.clientTimer = setInterval(() => {
+        if (x.state === 'ended' || x.clientWhy !== undefined) { clearInterval(x.clientTimer); return; }
+        /* the game: its program, or another the client started from its library (not an installer) */
+        const ps = client.procs(x.o.cgroup, UID).filter((p) => /\.exe$/.test(p.prog));
+        const isGame = ps.some((p) => p.prog === want) ||
+            ps.some((p) => /\\steamapps\\common\\/.test(p.path) && !NOT_THE_GAME.test(p.prog) && !AN_INSTALLER.test(p.prog));
+        if (isGame) {
+            goneFor = 0;
+            if (seenAt === null) { seenAt = Date.now(); log('client: the game runs (' + ps.map((p) => p.prog).filter((n) => !NOT_THE_GAME.test(n)).join(', ') + ')'); }
+            if (!frozen && Date.now() - seenAt > CLIENT_FREEZE_MS) {
+                frozen = true;
+                const n = client.freeze(x.o.cgroup, UID);
+                log('client: its web UI frozen while the game runs (' + n + ' processes; their memory goes to swap under the cap)');
+            }
+        } else if (seenAt !== null && ++goneFor >= 3) {
+            log('client: the game ended');
+            clearInterval(x.clientTimer);
+            hide('the game ended');
+            clientShutdown(x, null);
+        }
+    }, 2000);
+}
+const CLIENT_FREEZE_MS = 20000;
 
 /* ---- settings from the phone or the app --------------------------------------------- */
 
@@ -1200,7 +1410,15 @@ function setSetting(b) {
     if (b.resolution !== undefined) { const e = setResolution(String(b.resolution)); if (e) return e; }
     if (b.upscale !== undefined) { const e = setUpscale(String(b.upscale)); if (e) return e; }
     saveSettings();
+    if (b.client !== undefined) return clientSetting(!!b.client);
+    if (b.clientSignIn) return clientEnsure() || (client.account(env.PREFIX) ? 'already signed in' : null);
     return null;
+}
+
+/* the Steam client for the status: on, installed, the account, what is under way, the last word */
+function clientStatus() {
+    const a = client.installed(env.PREFIX) ? client.account(env.PREFIX) : null;
+    return { on: !!settings.client, installed: client.installed(env.PREFIX), account: a ? a.persona : null, step: clientState.step, note: clientState.note };
 }
 
 function setUser(name) {
@@ -1253,6 +1471,7 @@ function status() {
             usb: usb.sticks().map((s) => ({ id: s.id, fs: s.fs, fat32: s.fat32 })) },
         space: space, memory: { capMb: settings.memMb, usedMb: g ? mem.usedMb : null, peakMb: mem.peakMb, note: mem.note, oomAt: mem.oomAt },
         swap: swap.status(),
+        client: clientStatus(),
     };
 }
 

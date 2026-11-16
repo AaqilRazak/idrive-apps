@@ -106,6 +106,21 @@ workflow (Actions > Release, the component ids).
   path is checked directly, but the running bench container was the old code,
   so the UI toggle itself is untried); a real variant-1 / 2.0 binary (none to
   hand yet); then on the car (asked first), with real GPU and pad.
+- [ ] **Steam: the Steam client setting on the car** (merged with
+  0.3.2 on steam-integration; not released, no version bump: `src/client.js`, README "Steam client").
+  Off the car, on the play bench (2026-11-16): a fresh prefix (only BMW's
+  roots) to the sign-in's QR code on the screen (installer from Valve, 148
+  roots written, ~250 MB self-update, the restart survived); with a
+  signed-in client CoD: World at War (SteamStub 2.1) and Castle Crashers
+  start in it with nothing downloaded, its web UI frozen 20 s after the
+  game, the game's end and Stop end the session. Not checked: a real QR scan
+  ending the sign-in by itself (log-reading unit-tested). On the car (asked
+  first): memory under the 2560 MB cap before the UI is frozen (client
+  ~2.2 GB + the game; swap is zram first, then the disk file), the touch
+  screen's answers to first-start dialogs (DirectX, PunkBuster), how long a
+  start takes on the Atom. Later: the UI in a cgroup of its own (v1:
+  move_charge_at_immigrate) to push only it to swap; Steam's overlay
+  (gameoverlayui, ~75 MB) off; first-start redistributables marked done.
 - [ ] **Steam 0.2.1 on the car.** 0.2.0 on the car (2026-11-09): Vampire
   Survivors and Slay the Spire 2 run on ANV 22.3.7; Teslagrad launches (Vulkan,
   Run without Steam); Terraria on Wine Mono, 12 pictures/s on Vulkan against 6

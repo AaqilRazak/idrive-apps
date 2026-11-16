@@ -302,6 +302,36 @@ refused until parked, and the touch screen comes back in its place.
   phone page suggests it, nothing forces it. **Off the car only so far:**
   `test/steamstub_test.js` wraps programs of its own and unwraps them byte
   for byte; no real wrapped game yet (Castle Crashers is the first to try).
+- **Steam client** (Settings, off by default; `client.js`): off is the light
+  mode above. On, every game starts in Valve's own Windows client in the
+  prefix (`C:\SteamClient`), signed in with the owner's account: the other way
+  to a game with Steam's DRM (Remove Steam DRM takes it off instead; CoD:
+  World at War either way), and to games that want Steam itself. Turning it on downloads SteamSetup.exe from Valve through the
+  phone, writes the runtime's root certificates into the prefix's registry
+  (Wine takes its roots from the unit's `/etc/ssl/certs`, which has only
+  BMW's: every HTTPS through Windows' TLS failed, "http error 0"; kept off
+  Wine's HostImportedCertificates lists, or Wine deletes them for not being
+  on the unit), installs the client, then starts it on the screen to sign
+  in (its QR code, scanned with the Steam app, parked); its first start
+  updates it (~250 MB) and it restarts itself (the session goes on while a
+  Steam.exe does). Play then runs `steam.exe -silent -applaunch <id>`
+  straight (no Proton shim, no `steam.exe=b`, `PROTON_DISABLE_LSTEAMCLIENT=1`:
+  Proton's loader swaps steamclient.dll for its Linux bridge otherwise), the
+  game linked into the client's library (`steamapps/common/vzs-<id>`) with an
+  appmanifest whose depots are DepotDownloader's manifests, so the client
+  takes it as installed and up to date (without them it downloaded all of
+  CoD's 7 GB again). A game's first start may show its extras (DirectX,
+  PunkBuster's licence) and the client's notices on the screen, answered
+  there. 20 s after the game's process appears the client's web UI
+  (steamwebhelper, ~1.9 GB of its ~2.2 GB) is frozen and its memory goes to
+  swap under the cap; when the game's process ends, or on Stop, the client
+  is asked to shut down (15 s, then killed). The remembered sign-in is
+  checked before each start (AutoLoginUser put back if an installer run took
+  it). **Off the car only so far** (the play bench, 2026-11-16): a fresh
+  prefix to the sign-in's QR code on the screen; with a signed-in client,
+  CoD: World at War and Castle Crashers start in it with nothing
+  downloaded, the UI frozen, the game's end and Stop end the session.
+  `test/client_test.js` checks the library, the certificates, the account.
 - **Wine Mono (0.2.0):** GE-Proton's Wine Mono 11.3.0 (with FNA for XNA
   games) stays in `proton/share/wine/mono`, less its debug files: .NET
   Framework games (Terraria) run on it; the prefix is unchanged.
@@ -384,6 +414,7 @@ refused until parked, and the touch screen comes back in its place.
 | `unpack.js` | root | each `.tgz` into its folder once (sha256 stamp), streamed, links made last, swapped in by rename |
 | `steam.js` | - | DepotDownloader and its questions; finding a game's program; the store's name for an app id |
 | `steamstub.js` | root | Steam's DRM wrapper (SteamStub 1, 2 and 3) found on a game's program and taken off in place (Remove Steam DRM) |
+| `client.js` | root (the client: uid 12996) | the Steam client setting: Valve's client in the prefix, its installer, the root certificates, the library, the sign-in; Steam.exe in a game's session |
 | `game.js` | root | one game: the frame file, wl-sink, Wine (`launch.json`), the sound FIFO and player; Stop: `wineserver -k`, then whatever is left in the cgroup |
 | `wl-sink` | root, then uid 12996, group video | C (`src/wl_sink.c`): maps the frame file, drops to the uid, then the Wayland compositor Wine draws into; touches on its stdin become Wine's pointer |
 | `steam-touch` | root, then nobody | C (`src/touch_main.c`): the display's touches while the game is shown, read passively |

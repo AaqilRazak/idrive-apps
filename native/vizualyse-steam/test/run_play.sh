@@ -31,14 +31,17 @@
 # to check this bench itself; with PLAY_VOLUME=steam-play-selftest, a volume of its own.
 # PLAY_CPUS=0-3 (docker --cpuset-cpus), PLAY_CPU_SHARE=1.5 (--cpus), PLAY_MEMORY=6g (--memory):
 # narrower, though a PC core is not an Atom core.
+# PLAY_NAME=steam-play-2 (the container) with STEAM_PORT=8495: a second bench beside
+# another checkout's. PLAY_NO_BUILD=1: build/ and the GPU benches as they are (none
+# built); GPU_BENCH / VKT: the tools/gpu-bench and tools/vk-trial checkouts to use.
 set -eu
 export MSYS_NO_PATHCONV=1
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 WIN_HERE=$(cd "$HERE" && (pwd -W 2>/dev/null || pwd))
-GPU_BENCH=$HERE/../../tools/gpu-bench
-VKT=$HERE/../../tools/vk-trial
+GPU_BENCH=${GPU_BENCH:-$HERE/../../tools/gpu-bench}
+VKT=${VKT:-$HERE/../../tools/vk-trial}
 IMG=idrive-rootfs:I_21w12.2-1-4
-NAME=steam-play
+NAME=${PLAY_NAME:-steam-play}
 VOL=${PLAY_VOLUME:-steam-play-varopt}
 PORT=${STEAM_PORT:-8494}
 token() { docker exec $NAME cat /var/opt/vizualyse-steam/state/token 2>/dev/null | tr -d '\r\n'; }
@@ -46,9 +49,11 @@ case "${1:-start}" in
     start)
         ROOTFS=${ROOTFS:-$HERE/../../../idrive-rootfs/20.40.2/rootfs.tar}
         docker image inspect $IMG >/dev/null 2>&1 || docker import "$ROOTFS" $IMG >/dev/null
-        sh "$HERE/build.sh" >&2
-        sh "$GPU_BENCH/build.sh" >&2
-        [ -f "$VKT/build/bench/kernel414.so" ] || MESA_VER=22.3.7 sh "$VKT/build.sh" >&2
+        if [ -z "${PLAY_NO_BUILD:-}" ]; then
+            sh "$HERE/build.sh" >&2
+            sh "$GPU_BENCH/build.sh" >&2
+            [ -f "$VKT/build/bench/kernel414.so" ] || MESA_VER=22.3.7 sh "$VKT/build.sh" >&2
+        fi
         [ -z "${PLAY_FAKE:-}" ] || sh "$HERE/test/build_win.sh" >&2
         docker volume create "$VOL" >/dev/null
         if [ "${GPU:-stub}" = lavapipe ]; then
