@@ -198,7 +198,7 @@ load:
 |---|---|
 | Terraria | XNA, .NET Framework (no Wine Mono): "Wine Mono is not installed", exit 255 on the car (2026-11-08). Wine Mono 11.3.0 with FNA is in GE-Proton (planned back in) **2026-11-09, 0.2.0 (Wine Mono):** launches; about 12 pictures/s in game on Vulkan (DXVK), 6 on iris and 6 on i965 (WineD3D); iris and i965 start faster than Vulkan on its first run; its picture slightly cut at the top at 960x540 (0.2.1 fits it). |
 | Castle Crashers | SteamStub 3.1 x86 on castle.exe (`.bind`): exits 53 at once without help (2026-11-08). **Remove Steam DRM** (`steamstub.js`) + Run without Steam: on the bench (2026-11-16, Steam 0.2.4's tool, the exe unwrapped with 0.3.1's `unwrapExe`) it starts, runs at 30 fps and draws its title screen on DXVK (lavapipe). Not yet on the car. |
-| Call of Duty: World at War | SteamStub 2.1 x86 on CoDWaW.exe and CoDWaWmp.exe (appid 10090). **Remove Steam DRM** (Steam 0.3.2) detects and unwraps both to a clean PE on the bench (2026-11-16), the restored entry point real code; not yet launched. Then as the CoD titles above (D3D9, pad support unchecked, CPU-bound). Move up once it launches with Run without Steam. |
+| Call of Duty: World at War | SteamStub 2.1 x86 on CoDWaW.exe and CoDWaWmp.exe (appid 10090). **Remove Steam DRM** (Steam 0.3.2) unwraps both to a clean PE; with Run without Steam the unwrapped CoDWaW.exe **launches** on the bench (2026-11-16): window "Call of Duty®", its Treyarch intro drawing (~2 fps on lavapipe software GL), where the wrapped exe exited at once. D3D9 pad support, controls and real-GPU/car performance still unchecked. |
 | Defy Gravity | XNA, .NET Framework (no Wine Mono) |
 | Celeste | FNA on .NET Framework (Windows build) |
 | Rogue Legacy | XNA, .NET Framework |

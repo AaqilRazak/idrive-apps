@@ -97,12 +97,15 @@ workflow (Actions > Release, the component ids).
   all five variants byte for byte. On the bench (2026-11-16): **CoD: World at
   War is SteamStub 2.1 x86 (appid 10090); both CoDWaW.exe and CoDWaWmp.exe
   detect and unwrap to a clean PE whose restored entry point is real x86**
-  (the run_play steam-play container). Castle Crashers' castle.exe (3.1 x86)
-  unwrapped starts with Run without Steam and draws its title screen (DXVK on
-  lavapipe). Still: CoD:WaW actually *launched* after unwrapping (only the
-  unwrap is checked so far); a real variant-1 / 2.0 binary (none to hand yet);
-  the phone page's switch end to end on a 0.3.2 bench; then on the car (asked
-  first) with both switches.
+  (the run_play steam-play container). Unwrapped in place (unwrapExe) + Run
+  without Steam, **CoDWaW.exe launches**: window "Call of Duty®", reaches
+  running and draws its Treyarch film-leader intro at ~2 fps (lavapipe
+  software GL; the wrapped exe exits 53 at once). Castle Crashers' castle.exe
+  (3.1 x86) likewise starts and draws its title screen. Still: the phone
+  page's Remove Steam DRM switch end to end on a 0.3.2 bench (the unwrapExe
+  path is checked directly, but the running bench container was the old code,
+  so the UI toggle itself is untried); a real variant-1 / 2.0 binary (none to
+  hand yet); then on the car (asked first), with real GPU and pad.
 - [ ] **Steam 0.2.1 on the car.** 0.2.0 on the car (2026-11-09): Vampire
   Survivors and Slay the Spire 2 run on ANV 22.3.7; Teslagrad launches (Vulkan,
   Run without Steam); Terraria on Wine Mono, 12 pictures/s on Vulkan against 6

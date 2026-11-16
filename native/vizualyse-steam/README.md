@@ -292,9 +292,11 @@ refused until parked, and the touch screen comes back in its place.
   rolling-XOR decoded when the flags say so. Variant 1: no code encryption,
   the original entry point taken from the stub's exit jump. (Variant 2.1 is
   confirmed on the bench against Call of Duty: World at War's CoDWaW.exe and
-  CoDWaWmp.exe: detected and unwrapped to a clean PE whose restored entry
-  point is real code; variants 1 and 2.0 are so far only round-trip-tested.)
-  Steam's wrapped program is kept as `<exe>.vzs-orig`; off puts it
+  CoDWaWmp.exe: both detect and unwrap to a clean PE, and the unwrapped
+  CoDWaW.exe then launches under Wine with Run without Steam — window "Call of
+  Duty®", its Treyarch intro drawing — where the wrapped one exited at once.
+  Variants 1 and 2.0 are so far only round-trip-tested.) Steam's wrapped
+  program is kept as `<exe>.vzs-orig`; off puts it
   back; an update that brings it back is unwrapped again. Most such games
   also need Run without Steam: the
   phone page suggests it, nothing forces it. **Off the car only so far:**
