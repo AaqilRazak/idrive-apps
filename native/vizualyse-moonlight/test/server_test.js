@@ -59,8 +59,12 @@ function kit() {
     /* as on the car (/var/opt/<tool>/current): readable by the uplink uid */
     fs.chmodSync(TMP, 0o755);
     fs.chmodSync(k, 0o755);
-    ['server.js', 'gamestream.js', 'gs_worker.js', 'firewall.js', 'console_out.js', 'cluster_render_client.js', 'control.js', 'page.html', 'pcm_play.py', 'speakers.js']
-        .forEach((f) => fs.copyFileSync(path.join(HERE, 'src', f), path.join(k, f)));
+    /* every source file the kit ships (component.json "files"), as the car gets them:
+     * a list of its own here missed the touch screen's (touch.js, the touch kit's
+     * ui_*.js, ...), so server.js didn't start (CI, 2026-11-16) */
+    JSON.parse(fs.readFileSync(path.join(HERE, 'component.json'), 'utf8')).files
+        .filter((f) => /^src\//.test(f.from))
+        .forEach((f) => fs.copyFileSync(path.join(HERE, f.from), path.join(k, f.path)));
     fs.copyFileSync(path.join(HERE, 'build', 'hint.rgba'), path.join(k, 'hint.rgba'));
     fs.copyFileSync(path.join(HERE, 'build', 'moonlight-core'), path.join(k, 'moonlight-core'));
     fs.chmodSync(path.join(k, 'moonlight-core'), 0o755);

@@ -16,8 +16,13 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const VERSION = '7.0.2';
-/* The current release lives in releases/, older ones move to old-releases/. */
-const URLS = ['releases', 'old-releases'].map((d) => 'https://johnvansickle.com/ffmpeg/' + d + '/ffmpeg-' + VERSION + '-amd64-static.tar.xz');
+/* The current release lives in releases/, older ones move to old-releases/; the
+ * newest is also releases/ffmpeg-release-amd64-static.tar.xz, the only name 7.0.2
+ * is still served under (the versioned ones 404 since 2026-11-16, CI failed; the
+ * generic one is the pinned archive, sha256 checked; once a newer release
+ * replaces it there, the pin needs a new home). */
+const URLS = ['releases', 'old-releases'].map((d) => 'https://johnvansickle.com/ffmpeg/' + d + '/ffmpeg-' + VERSION + '-amd64-static.tar.xz')
+    .concat(['https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz']);
 /* The archive johnvansickle.com published as ffmpeg-release-amd64-static.tar.xz on
  * 2024-08-23 (md5 7fa72b652e19bf84c9461e332ea1cdf3). */
 const SHA256 = process.env.FFMPEG_SHA256 || 'abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67';
