@@ -16,12 +16,13 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const VERSION = '7.0.2';
-/* The current release lives in releases/, older ones move to old-releases/; the
- * newest is also releases/ffmpeg-release-amd64-static.tar.xz, the only name 7.0.2
- * is still served under (the versioned ones 404 since 2026-11-16, CI failed; the
- * generic one is the pinned archive, sha256 checked; once a newer release
- * replaces it there, the pin needs a new home). */
-const URLS = ['releases', 'old-releases'].map((d) => 'https://johnvansickle.com/ffmpeg/' + d + '/ffmpeg-' + VERSION + '-amd64-static.tar.xz')
+/* First our own copy of the pinned archive (this repository's release
+ * deps-ffmpeg-7.0.2): johnvansickle.com sends GitHub's runners a 7 KB page in
+ * place of it (the release, 2026-11-16) and no longer has the versioned names
+ * (404). Then the site: releases/, old-releases/, and the generic newest name,
+ * which was still this archive on 2026-11-16. Each is checked against SHA256. */
+const URLS = ['https://github.com/Vizualyse/idrive-apps/releases/download/deps-ffmpeg-' + VERSION + '/ffmpeg-' + VERSION + '-amd64-static.tar.xz']
+    .concat(['releases', 'old-releases'].map((d) => 'https://johnvansickle.com/ffmpeg/' + d + '/ffmpeg-' + VERSION + '-amd64-static.tar.xz'))
     .concat(['https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz']);
 /* The archive johnvansickle.com published as ffmpeg-release-amd64-static.tar.xz on
  * 2024-08-23 (md5 7fa72b652e19bf84c9461e332ea1cdf3). */
