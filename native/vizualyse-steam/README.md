@@ -13,7 +13,7 @@ Background: [knowledge/games.md](../../knowledge/games.md).
 clicks, a drag moves with the button held); .NET Framework games (no Wine
 Mono). Games that need the Steam client running (it doesn't
 run here) get **Run without Steam** per game (gbe_fork, below), and games
-wrapped in Steam's DRM **Remove Steam DRM** (SteamStub 3.x, below). 64-bit and
+wrapped in Steam's DRM **Remove Steam DRM** (SteamStub, below). 64-bit and
 32-bit games run on the car (Slay the Spire 2, FTL; 32-bit through our
 rebuilt `ntdll.so`, below).
 
@@ -277,17 +277,26 @@ refused until parked, and the touch screen comes back in its place.
 - **Remove Steam DRM** (per game, off by default; shown on a game whose
   program has Steam's DRM wrapper, SteamStub: a `.bind` section, spotted at
   install): `steamstub.js`, our own unwrapper (written from the format's
-  description, not from another unpacker's source). Variant 3: the header
-  before the stub's entry point (dwords XOR-chained, signature
-  `0xC0DEC0DF`), the code section decrypted (AES-256-CBC, its IV
-  ECB-decrypted, the 16 bytes moved into the header put back), the original
-  entry point restored, `.bind` dropped when it is last and nothing points
-  into it, file offsets and the checksum fixed. 3.1 x86 / x64 and 3.0 x86
-  by their known layouts; 3.0 x64 with 3.1's fields (guessed); each layout
-  checked against the program before anything is written. Variants 1 and 2
-  are found, not taken off: the phone page says so. Steam's wrapped program
-  is kept as `<exe>.vzs-orig`; off puts it back; an update that brings it
-  back is unwrapped again. Most such games also need Run without Steam: the
+  description, not from another unpacker's source). In every case the
+  original entry point is restored, `.bind` dropped when it is last and
+  nothing points into it, and the file offsets, sizes and checksum fixed;
+  each layout is checked against the program before anything is written.
+  Variant 3: the header before the stub's entry point (dwords XOR-chained,
+  signature `0xC0DEC0DF`), the code section decrypted (AES-256-CBC, its IV
+  ECB-decrypted, the 16 bytes moved into the header put back); 3.1 x86 / x64
+  and 3.0 x86 by their known layouts, 3.0 x64 with 3.1's fields (guessed).
+  Variant 2.1: the entry point gives the header address and key, the header
+  an XOR'd payload, the payload an XTEA-encrypted SteamDRMP.dll whose code
+  gives the offsets of the AES-256 parameters (the code section decrypted as
+  in variant 3). Variant 2.0: a rolling-XOR header, the code section
+  rolling-XOR decoded when the flags say so. Variant 1: no code encryption,
+  the original entry point taken from the stub's exit jump. (Variant 2.1 is
+  confirmed on the bench against Call of Duty: World at War's CoDWaW.exe and
+  CoDWaWmp.exe: detected and unwrapped to a clean PE whose restored entry
+  point is real code; variants 1 and 2.0 are so far only round-trip-tested.)
+  Steam's wrapped program is kept as `<exe>.vzs-orig`; off puts it
+  back; an update that brings it back is unwrapped again. Most such games
+  also need Run without Steam: the
   phone page suggests it, nothing forces it. **Off the car only so far:**
   `test/steamstub_test.js` wraps programs of its own and unwraps them byte
   for byte; no real wrapped game yet (Castle Crashers is the first to try).
@@ -372,7 +381,7 @@ refused until parked, and the touch screen comes back in its place.
 | `usb.js` | root | USB sticks as an install location: the HMI's mount read-write, our exec view, a pulled stick's mount gone |
 | `unpack.js` | root | each `.tgz` into its folder once (sha256 stamp), streamed, links made last, swapped in by rename |
 | `steam.js` | - | DepotDownloader and its questions; finding a game's program; the store's name for an app id |
-| `steamstub.js` | root | Steam's DRM wrapper (SteamStub 3.x) found on a game's program and taken off in place (Remove Steam DRM) |
+| `steamstub.js` | root | Steam's DRM wrapper (SteamStub 1, 2 and 3) found on a game's program and taken off in place (Remove Steam DRM) |
 | `game.js` | root | one game: the frame file, wl-sink, Wine (`launch.json`), the sound FIFO and player; Stop: `wineserver -k`, then whatever is left in the cgroup |
 | `wl-sink` | root, then uid 12996, group video | C (`src/wl_sink.c`): maps the frame file, drops to the uid, then the Wayland compositor Wine draws into; touches on its stdin become Wine's pointer |
 | `steam-touch` | root, then nobody | C (`src/touch_main.c`): the display's touches while the game is shown, read passively |
@@ -414,11 +423,11 @@ the library (`library.json`), `game-running` while a game runs.
   every process of the uid. `VERBOSE=1`, `GREP_LOG=regex` show the tool's log.
 - `node test/steamstub_test.js` checks Remove Steam DRM: small x86 / x64
   programs made in the test, wrapped by the test's own SteamStub packer
-  (3.1, 3.0; encrypted or not; the code section's file size shrunk; an
-  overlay; a checksum), unwrapped back to the original byte for byte; a
-  `.bind` a directory points into kept; an unknown `.bind`, truncated and
-  garbled files refused cleanly; the in-place switch through an update.
-  Node 8 in CI.
+  (3.1, 3.0, 2.1, 2.0 and 1; encrypted or not; the code section's file size
+  shrunk; an overlay; a checksum), unwrapped back to the original byte for
+  byte; a `.bind` a directory points into kept; a `.bind` of no header we
+  know, truncated and garbled files refused cleanly; the in-place switch
+  through an update. Node 8 in CI.
 - `node test/touch_test.js [out dir]` checks the touch screen: both tabs in
   every state lint clean (targets 64 px or more, none overlapping) and are
   written as PNGs; one picture at a time against a stand-in game and

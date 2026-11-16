@@ -114,6 +114,133 @@ function make(o) {
     return { orig: orig.buffer, packed: packed.buffer, text: text };
 }
 
+/* ---- the packer for variants 1, 2.0 and 2.1 (all 32-bit), our own ---------- */
+const PRO = Buffer.from([0x53, 0x51, 0x52, 0x56, 0x57, 0x55, 0x8b, 0xec, 0x81, 0xec, 0x00, 0x10, 0x00, 0x00]);
+function u32(v) { const b = Buffer.alloc(4); b.writeUInt32LE(v >>> 0, 0); return b; }
+function movReg(reg, imm) { return Buffer.concat([Buffer.from([0xb8 + reg]), u32(imm)]); }      /* mov r32, imm32 */
+function movMem(imm) { return Buffer.concat([Buffer.from([0xc7, 0x05, 0, 0, 0, 0]), u32(imm)]); } /* mov [disp32], imm32 */
+/* the rolling XOR seeded with 0 (variant 2.0 header), its inverse of xorDecode */
+function xorEncodeK(plain, key) { const e = Buffer.from(plain); for (let i = 0; i + 4 <= plain.length; i += 4) { const c = (plain.readUInt32LE(i) ^ key) >>> 0; e.writeUInt32LE(c, i); key = c; } return { out: e, key: key >>> 0 }; }
+
+const XD = 0x9e3779b9;
+function xteaEncBlock(v0, v1, key) {
+    let sum = 0;
+    for (let r = 0; r < 32; r++) {
+        v0 = (v0 + (((((v1 << 4) ^ (v1 >>> 5)) >>> 0) + v1) >>> 0 ^ (sum + key[sum & 3])) >>> 0) >>> 0;
+        sum = (sum + XD) >>> 0;
+        v1 = (v1 + (((((v0 << 4) ^ (v0 >>> 5)) >>> 0) + v0) >>> 0 ^ (sum + key[(sum >>> 11) & 3])) >>> 0) >>> 0;
+    }
+    return [v0 >>> 0, v1 >>> 0];
+}
+function xteaEnc(buf, key) {
+    const n = buf.length - (buf.length % 8), out = Buffer.alloc(n);
+    let v1 = 0x55555555, v2 = 0x55555555;
+    for (let o = 0; o + 8 <= n; o += 8) {
+        const c = xteaEncBlock((buf.readUInt32LE(o) ^ v1) >>> 0, (buf.readUInt32LE(o + 4) ^ v2) >>> 0, key);
+        out.writeUInt32LE(c[0], o); out.writeUInt32LE(c[1], o + 4);
+        v1 = c[0]; v2 = c[1];
+    }
+    return out;
+}
+
+/* the sections (.text, .data, .bind) and the two programs */
+function wrap2(o, buildBind) {
+    const text = crypto.randomBytes(o.codeLen), data = crypto.randomBytes(0x300), base = 0x400000, oepOff = 0x10, textVa = SA;
+    const t = buildBind.text ? buildBind.text(text) : { data: text, raw: al(text.length, FA) };
+    const textRaw = t.raw;
+    const bindVa = SA + al(Math.max(o.codeLen, textRaw), SA) + al(Math.max(0x300, 0x400), SA);
+    const bindData = buildBind.bind({ base: base, textVa: textVa, oepOff: oepOff, bindVa: bindVa, text: text });
+    const sections = (textPart, bind) => [{ name: '.text', data: textPart.data, vs: o.codeLen, raw: textPart.raw },
+        { name: '.data', data: data, chars: 0xc0000040 }].concat(bind ? [{ name: '.bind', data: bindData, chars: 0xe0000060 }] : []);
+    const orig = buildPe({ x64: false, sections: sections({ data: text, raw: al(text.length, FA) }), ep: () => textVa + oepOff, checksum: o.checksum });
+    const packed = buildPe({ x64: false, sections: sections(t, true), ep: () => bindVa + buildBind.epAt, checksum: o.checksum });
+    return { orig: orig.buffer, packed: packed.buffer, text: text };
+}
+
+/* variant 1: no code change; the header (byte x ^= x*x) and a trampoline in .bind */
+function makeV1(o) {
+    return wrap2(o, { epAt: 0, bind: (c) => {
+        const ep = Buffer.concat([Buffer.from([0x60, 0x81, 0xec, 0x00, 0x10, 0x00, 0x00]), movReg(6, c.base + c.bindVa + 0x100), movReg(1, 0x6a)]);
+        const tramp = Buffer.from([0x61, 0xb8].concat([0, 0, 0, 0], [0xff, 0xe0]));
+        u32(c.base + c.textVa + c.oepOff).copy(tramp, 2);
+        const h = Buffer.alloc(0x6a * 4);
+        h.writeUInt32LE(c.base + c.bindVa, 8);                       /* BindFunction: base + the entry point */
+        h.writeUInt32LE(o.appId || 204360, 0x14);
+        const b = Buffer.alloc(al(0x100 + h.length, FA), 0x90);
+        ep.copy(b, 0); tramp.copy(b, 0x40); stub.squareXor(h).copy(b, 0x100);
+        return b;
+    } });
+}
+
+/* variant 2.0: the code section rolling-XOR'd when the flags say so (0x4) */
+function makeV20(o) {
+    const enc = !!(o.flags & stub.NO_ENCRYPTION), codeXor = 0x9abcdef0 >>> 0, count = o.count || 221, size = count * 4;
+    const L = { 214: { flags: 0x14, oep: 0x28, codeVa: 0x2c, codeSize: 0x30, codeXor: 0x34, appId: 0x38 },
+        221: { flags: 0x18, oep: 0x2c, codeVa: 0x30, codeSize: 0x34, codeXor: 0x38, appId: 0x3c },
+        238: { flags: 0x18, oep: 0x2c, codeVa: 0x30, codeSize: 0x34, codeXor: 0x38, appId: 0x3c } }[count];
+    return wrap2(o, { epAt: 4,
+        text: (text) => enc ? { data: xorEncodeK(text, codeXor).out, raw: al(text.length, FA) } : { data: text, raw: al(text.length, FA) },
+        bind: (c) => {
+            const h = Buffer.alloc(size);
+            h.writeUInt32LE(o.flags || 0, L.flags);
+            h.writeUInt32LE(c.base + c.textVa + c.oepOff, L.oep);
+            h.writeUInt32LE(o.appId || 204360, L.appId);
+            if (enc) { h.writeUInt32LE(c.base + c.textVa, L.codeVa); h.writeUInt32LE(o.codeLen, L.codeSize); h.writeUInt32LE(codeXor, L.codeXor); }
+            const ep = Buffer.concat([PRO, movReg(6, c.base + c.bindVa + 0x100), movReg(1, count)]);
+            const b = Buffer.alloc(al(0x100 + size, FA), 0x90);
+            b.writeUInt32LE(stub.MARK2, 0); ep.copy(b, 4); xorEncode(h).copy(b, 0x100);
+            return b;
+        } });
+}
+
+/* variant 2.1: an XOR'd payload, an XTEA'd SteamDRMP.dll, the code AES-256-CBC */
+function makeV21(o) {
+    const enc = !(o.flags & stub.NO_ENCRYPTION), key = crypto.randomBytes(32), realIv = crypto.randomBytes(16);
+    const count = 0x40, xorKey = 0x1234abcd >>> 0;
+    const xkey = [0x11111111, 0x22222222, 0x33333333, 0x44444444];
+    return wrap2(o, { epAt: 4,
+        text: (text) => { const ct = enc ? cipher('aes-256-cbc', key, realIv, text) : text;
+            return enc ? { data: ct.slice(16), raw: o.shrink ? al(ct.length - 16, FA) : al(ct.length - 16, FA) } : { data: text, raw: al(text.length, FA) }; },
+        bind: (c) => {
+            const ct = enc ? cipher('aes-256-cbc', key, realIv, c.text) : c.text;
+            const DLL = 0x800, PAY = 0x400, HDR = 0x100;
+            /* the payload: the SteamDRMP pointers and the real parameters */
+            const payload = Buffer.alloc(0x100, 0);
+            const pDllVa = 0x40, pDllSize = 0x44, pXtea = 0xd0;
+            const pFlags = 0x80, pOep = 0x84, pCode = 0x88, pEnc = 0x8c, pKey = 0x90, pIv = 0xb0; /* stolen at pIv + 16 */
+            /* SteamDRMP.dll's parameter block: load/store pairs (mov reg,[eax+off];
+             * mov [abs],reg), then lea for the key and add eax,imm for the IV */
+            const dll = Buffer.alloc(0x80, 0x90);
+            const pair = (at, mod, off) => { dll[at] = 0x8b; dll[at + 1] = mod; dll.writeUInt32LE(off >>> 0, at + 2); dll[at + 6] = 0x89; dll[at + 7] = 0x15; dll.writeUInt32LE(0x10040000, at + 8); };
+            pair(0, 0x88, pFlags); pair(12, 0x90, 0); pair(24, 0x90, pOep); pair(36, 0x90, pCode); pair(48, 0x90, pEnc);
+            dll[60] = 0x8d; dll[61] = 0x90; dll.writeUInt32LE(pKey >>> 0, 62);   /* lea edx, [eax+pKey] */
+            dll[66] = 0x05; dll.writeUInt32LE(pIv >>> 0, 67);                    /* add eax, pIv */
+            const dllCt = xteaEnc(dll, xkey);
+            payload.writeUInt32LE(c.base + c.bindVa + DLL, pDllVa);
+            payload.writeUInt32LE(dllCt.length, pDllSize);
+            xkey.forEach((k, i) => payload.writeUInt32LE(k, pXtea + i * 4));
+            payload.writeUInt32LE(o.flags || 0, pFlags);
+            payload.writeUInt32LE(c.base + c.textVa + c.oepOff, pOep);
+            payload.writeUInt32LE(c.base + c.textVa, pCode);
+            payload.writeUInt32LE(enc ? c.text.length - 16 : 0, pEnc);
+            key.copy(payload, pKey);
+            cipher('aes-256-ecb', key, Buffer.alloc(0), realIv).copy(payload, pIv);
+            if (enc) ct.copy(payload, pIv + 16, 0, 16);              /* the stolen bytes */
+            /* the header: pointers to the payload, SteamDRMP and the XTEA key */
+            const h = Buffer.alloc(count * 4);
+            h.writeUInt32LE(xorKey, 0x00);
+            h.writeUInt32LE(c.base + c.bindVa + PAY, 0x24); h.writeUInt32LE(payload.length, 0x28);
+            h.writeUInt32LE(o.appId || 204360, 0x2c);
+            h.writeUInt32LE(pDllVa, 0x3c); h.writeUInt32LE(pDllSize, 0x40); h.writeUInt32LE(pXtea, 0x44);
+            const he = xorEncodeK(h, xorKey);
+            const pe = xorEncodeK(payload, he.key);
+            const ep = Buffer.concat([PRO, movMem(c.base + c.bindVa + HDR), movMem(xorKey), movReg(0, count)]);
+            const b = Buffer.alloc(al(DLL + dllCt.length + 0x10, FA), 0x90);
+            b.writeUInt32LE(stub.MARK2, 0); ep.copy(b, 4); he.out.copy(b, HDR); pe.out.copy(b, PAY); dllCt.copy(b, DLL);
+            return b;
+        } });
+}
+
 let fails = 0;
 function check(name, fn) {
     try { fn(); console.log('ok   ' + name); } catch (e) { fails++; console.log('FAIL ' + name + ': ' + (e && e.stack || e)); }
@@ -143,6 +270,32 @@ cases.forEach(([name, o]) => check(name, () => {
     assert.strictEqual(stub.detectBuffer(r.buffer), null);
 }));
 
+/* ---- variants 1, 2.0 and 2.1 (all 32-bit) unwrapped back, byte for byte ------ */
+const v12 = [
+    ['1 x86, no code change', makeV1, { codeLen: 0x400 }, { variant: '1', encrypted: false }],
+    ['2.0 x86, the code rolling-XOR encoded (884-byte header)', makeV20, { codeLen: 0x400, flags: 0x04 }, { variant: '2.0', encrypted: true }],
+    ['2.0 x86, the 856-byte header', makeV20, { codeLen: 0x400, count: 214, flags: 0x04 }, { variant: '2.0', encrypted: true }],
+    ['2.0 x86, the 952-byte header', makeV20, { codeLen: 0x200, count: 238, flags: 0x04 }, { variant: '2.0', encrypted: true }],
+    ['2.0 x86, UseEncodedCodeSection clear (code left alone)', makeV20, { codeLen: 0x400, flags: 0 }, { variant: '2.0', encrypted: false }],
+    ['2.1 x86, XOR payload + XTEA SteamDRMP.dll + AES code', makeV21, { codeLen: 0x400 }, { variant: '2.1', encrypted: true }],
+    ['2.1 x86, the code file size shrunk (it grows back)', makeV21, { codeLen: 0x210, shrink: true }, { variant: '2.1', encrypted: true }],
+    ['2.1 x86, NoEncryption', makeV21, { codeLen: 0x400, flags: stub.NO_ENCRYPTION }, { variant: '2.1', encrypted: false }],
+    ['2.1 x86, a checksum made right again', makeV21, { codeLen: 0x210, shrink: true, checksum: true }, { variant: '2.1', encrypted: true }],
+];
+v12.forEach(([name, mk, o, exp]) => check(name, () => {
+    const m = mk(o);
+    const d = stub.detectBuffer(m.packed);
+    assert.ok(d && d.supported, 'detected: ' + JSON.stringify(d));
+    assert.strictEqual(d.variant, exp.variant);
+    assert.strictEqual(d.arch, 'x86');
+    assert.strictEqual(d.appId, 204360);
+    assert.strictEqual(d.encrypted, exp.encrypted);
+    const r = stub.unpackBuffer(m.packed);
+    assert.ok(r.info.bindRemoved, '.bind removed');
+    assert.ok(r.buffer.equals(m.orig), 'the unwrapped program differs from the one before wrapping (' + r.buffer.length + ' vs ' + m.orig.length + ' bytes)');
+    assert.strictEqual(stub.detectBuffer(r.buffer), null);
+}));
+
 /* a .bind that a directory points into stays: the code and entry point still come back */
 check('a .bind a directory points into stays; code and entry point restored', () => {
     const o = { layout: '3.1', x64: false, codeLen: 0x400, packedDirs: [{ i: 9, rva: (p) => p[2].va, size: 0x18 }] };
@@ -164,14 +317,14 @@ check('a program without .bind: null', () => {
     assert.strictEqual(stub.detectBuffer(m.orig), null);
     assert.throws(() => stub.unpackBuffer(m.orig), (e) => e instanceof stub.StubError && /no \.bind/.test(e.message));
 });
-check('a .bind with no variant 3 header: found, not supported, said why', () => {
+check('a .bind with no header we know: found, not supported, said why', () => {
     const m = make({ layout: '3.1', x64: false, codeLen: 0x400 });
     const b = Buffer.from(m.packed), opt = 0x98, ep = b.readUInt32LE(opt + 16);
     const bindPtr = b.readUInt32LE(opt + 0xe0 + 2 * 40 + 20), bindVa = b.readUInt32LE(opt + 0xe0 + 2 * 40 + 12);
     b.fill(0x55, bindPtr, bindPtr + (ep - bindVa));
     const d = stub.detectBuffer(b);
-    assert.ok(d && d.supported === false && /variant 1 or 2/.test(d.why), JSON.stringify(d));
-    assert.throws(() => stub.unpackBuffer(b), (e) => e instanceof stub.StubError && /variant 1 or 2/.test(e.message));
+    assert.ok(d && d.supported === false && /take off yet/.test(d.why), JSON.stringify(d));
+    assert.throws(() => stub.unpackBuffer(b), (e) => e instanceof stub.StubError && /take off yet/.test(e.message));
 });
 check('a 3.1 header with a code size that isn\'t whole AES blocks: not taken', () => {
     const m = make({ layout: '3.1', x64: false, codeLen: 0x400 });

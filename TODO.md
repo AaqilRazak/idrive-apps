@@ -90,13 +90,19 @@ workflow (Actions > Release, the component ids).
   - A game with Steam's API needs Run without Steam here as on the car
     (no Steam client): Terraria says "Please launch the game from your
     Steam client" without it. Turn it on by itself for such a game?
-- [ ] **Steam 0.3.1: Remove Steam DRM on the car** (our own SteamStub 3.x
-  unwrapper, `src/steamstub.js`; not released). On the bench (2026-11-16):
-  Castle Crashers' castle.exe is SteamStub 3.1 x86, unwrapped it starts with
-  Run without Steam and draws its title screen (DXVK on lavapipe). Still:
-  the phone page's switch end to end on a 0.3.1 bench; then on the car
-  (asked first) Castle Crashers with both switches. CoD: World at War is
-  SteamStub 1 / 2: not supported.
+- [ ] **Steam 0.3.2: Remove Steam DRM, variants 1 / 2 / 3** (our own
+  SteamStub unwrapper, `src/steamstub.js`; not released). 0.3.2 adds
+  variants 1.0, 2.0 and 2.1 (XOR header, XOR'd payload, XTEA SteamDRMP.dll,
+  AES code) to the variant-3 unwrapper; `test/steamstub_test.js` round-trips
+  all five variants byte for byte. On the bench (2026-11-16): **CoD: World at
+  War is SteamStub 2.1 x86 (appid 10090); both CoDWaW.exe and CoDWaWmp.exe
+  detect and unwrap to a clean PE whose restored entry point is real x86**
+  (the run_play steam-play container). Castle Crashers' castle.exe (3.1 x86)
+  unwrapped starts with Run without Steam and draws its title screen (DXVK on
+  lavapipe). Still: CoD:WaW actually *launched* after unwrapping (only the
+  unwrap is checked so far); a real variant-1 / 2.0 binary (none to hand yet);
+  the phone page's switch end to end on a 0.3.2 bench; then on the car (asked
+  first) with both switches.
 - [ ] **Steam 0.2.1 on the car.** 0.2.0 on the car (2026-11-09): Vampire
   Survivors and Slay the Spire 2 run on ANV 22.3.7; Teslagrad launches (Vulkan,
   Run without Steam); Terraria on Wine Mono, 12 pictures/s on Vulkan against 6

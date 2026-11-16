@@ -49,11 +49,12 @@ Should work when all of these hold:
   i965: 3.0 compat, 4.5 core);
 - playable with a **wired XInput pad** or **left click / drag only** (no
   keyboard, right click or hover on touch);
-- single-player, offline, no anti-cheat; a Steam DRM wrapper (SteamStub)
-  only of variant 3 (Remove Steam DRM, untried on a real game yet).
+- single-player, offline, no anti-cheat; a Steam DRM wrapper (SteamStub) of
+  variant 1, 2 or 3 (Remove Steam DRM; variants 3 and 2.1 unwrapped on the
+  bench, variant 1 / 2.0 only round-trip-tested so far).
 
 Hard limits (Unsupported): D3D12 only (no VKD3D on ANV 19); Vulkan 1.2+
-only (ANV 19.1.8 is Vulkan 1.1); .NET Framework / XNA (no Wine Mono, yet); SteamStub 1 / 2, anti-cheat,
+only (ANV 19.1.8 is Vulkan 1.1); .NET Framework / XNA (no Wine Mono, yet); anti-cheat,
 online-only; Games for Windows Live; needs more than the RAM cap.
 
 Learned on the car (2026-11-08): **older engines need a screen of at least
@@ -197,7 +198,7 @@ load:
 |---|---|
 | Terraria | XNA, .NET Framework (no Wine Mono): "Wine Mono is not installed", exit 255 on the car (2026-11-08). Wine Mono 11.3.0 with FNA is in GE-Proton (planned back in) **2026-11-09, 0.2.0 (Wine Mono):** launches; about 12 pictures/s in game on Vulkan (DXVK), 6 on iris and 6 on i965 (WineD3D); iris and i965 start faster than Vulkan on its first run; its picture slightly cut at the top at 960x540 (0.2.1 fits it). |
 | Castle Crashers | SteamStub 3.1 x86 on castle.exe (`.bind`): exits 53 at once without help (2026-11-08). **Remove Steam DRM** (`steamstub.js`) + Run without Steam: on the bench (2026-11-16, Steam 0.2.4's tool, the exe unwrapped with 0.3.1's `unwrapExe`) it starts, runs at 30 fps and draws its title screen on DXVK (lavapipe). Not yet on the car. |
-| Call of Duty: World at War | SteamStub 1 / 2 on CoDWaW.exe and CoDWaWmp.exe (2026-11-16, bench): not taken off; the phone page says so. |
+| Call of Duty: World at War | SteamStub 2.1 x86 on CoDWaW.exe and CoDWaWmp.exe (appid 10090). **Remove Steam DRM** (Steam 0.3.2) detects and unwraps both to a clean PE on the bench (2026-11-16), the restored entry point real code; not yet launched. Then as the CoD titles above (D3D9, pad support unchecked, CPU-bound). Move up once it launches with Run without Steam. |
 | Defy Gravity | XNA, .NET Framework (no Wine Mono) |
 | Celeste | FNA on .NET Framework (Windows build) |
 | Rogue Legacy | XNA, .NET Framework |
