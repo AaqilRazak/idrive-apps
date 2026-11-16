@@ -43,6 +43,8 @@ const env = require('./env.js');
 const unpack = require('./unpack.js');
 const steam = require('./steam.js');
 const steamstub = require('./steamstub.js');
+const { Art } = require('./art.js');
+const touchView = require('./touch_view.js');
 const { Game } = require('./game.js');
 const { Speakers } = require('./speakers.js');
 const usb = require('./usb.js');
@@ -551,13 +553,33 @@ function touchDownload() {
     return { text: text, percent: d.state === 'downloading' ? Number(d.percent || 0) : null };
 }
 
+/* why a library game can't be played now (null: it can), and its program's path when it is here */
+function gameNow(id) {
+    const x = library[id], busy = download && ['done', 'failed', 'stopped'].indexOf(download.state) < 0 ? download.o.appId : null;
+    const stick = gameStick(x), here = !stick || stickSet.has(stick);
+    const why = busy === Number(id) ? 'Downloading' : !x.exe ? '(no program found)' : !here ? '(USB stick not plugged in)' : null;
+    return { why: why, exe: here && x.exe && x.dir ? path.join(x.dir, x.exe) : null };
+}
+
 function touchLibrary() {
-    const busy = download && ['done', 'failed', 'stopped'].indexOf(download.state) < 0 ? download.o.appId : null;
     return Object.keys(library).map((id) => {
-        const x = library[id], stick = gameStick(x), here = !stick || stickSet.has(stick), appId = Number(id);
-        const why = busy === appId ? 'Downloading' : !x.exe ? '(no program found)' : !here ? '(USB stick not plugged in)' : null;
-        return { appId: appId, name: x.name || 'App ' + id, playable: !why, why: why };
+        const x = library[id], why = gameNow(id).why;
+        return { appId: Number(id), name: x.name || 'App ' + id, playable: !why, why: why };
     }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* the games' pictures (art.js): Steam's store picture, fetched once through
+ * the phone, else the program's icon; asked for by the view for what it shows */
+const art = new Art({ dir: path.join(env.STATE_DIR, 'art'), log: log, uid: UID, gid: UID,
+    dns: () => (settings.enabled ? phoneDns()[0] || null : null),
+    onReady: () => { try { touchUi.refresh(); } catch (e) { /* not up yet */ } } });
+function touchArt(appId, which) {
+    if (!library[appId]) return null;
+    art.want(appId);
+    const now = gameNow(appId), tile = which === 'tile';
+    const playing = !!(game && game.state !== 'ended' && game.o.appId === Number(appId));
+    const size = tile ? touchView.TILE : touchView.THUMB;
+    return art.picture(appId, size.w, size.h, { plate: touchView.plate(appId), exe: now.exe, fade: tile, dim: tile && !!now.why && !playing });
 }
 
 /* the resolutions for the touch screen: a short name and the shape */
@@ -576,6 +598,7 @@ function touchModel() {
         game: g ? { appId: g.o.appId, name: g.o.name, state: g.state, fps: g.stats.fps, gpuBuffers: !!g.gpuBuffers, note: g.note, shown: screen.shown() } : null,
         running: live, moving: moving(), library: touchLibrary(), download: touchDownload(),
         resolution: settings.resolution, upscale: settings.upscale, resolutions: RES_TOUCH, link: settings.enabled ? linkNow : null,
+        art: touchArt,
     };
 }
 
@@ -849,6 +872,7 @@ function removeGame(appId) {
     }
     delete library[appId];
     saveLibrary();
+    art.remove(appId);
     /* only a folder of ours */
     if (g.dir && (g.dir.indexOf(env.INTERNAL_GAMES + '/') === 0 || g.dir.indexOf(env.DISK_GAMES + '/') === 0
         || (stick && g.dir.indexOf(path.join(usb.USB_DIR, stick, usb.GAMES_SUB) + '/') === 0))) {

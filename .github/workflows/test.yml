@@ -84,6 +84,11 @@ jobs:
         run: node native/vizualyse-steam/test/detail_test.js
       - name: Steam's DRM wrapper taken off (SteamStub 3.0 / 3.1, x86 / x64, wrapped here and unwrapped byte for byte; Node 8)
         run: docker run --rm -v "$PWD:/repo:ro" -w /repo node:8.16.2-alpine node native/vizualyse-steam/test/steamstub_test.js
+      - name: The games' pictures on the touch screen (a baseline JPEG reader against Pillow's, icons from programs made here, the pictures made and kept; Node 8)
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo node:8.16.2-alpine node native/vizualyse-steam/test/jpeg_test.js
+          docker run --rm -v "$PWD:/repo:ro" -w /repo node:8.16.2-alpine node native/vizualyse-steam/test/ico_test.js
+          docker run --rm -v "$PWD:/repo:ro" -w /repo node:8.16.2-alpine node native/vizualyse-steam/test/art_test.js
       - name: Cluster themes (shader rules; every theme on Node 8; the tool against a fake cluster-render on Node 8; the picker on Node 8; the touch reader on mgu-python's Python, as root)
         run: |
           node native/vizualyse-cluster/test/shader_lint.js

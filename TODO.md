@@ -97,6 +97,16 @@ workflow (Actions > Release, the component ids).
   the phone page's switch end to end on a 0.3.1 bench; then on the car
   (asked first) Castle Crashers with both switches. CoD: World at War is
   SteamStub 1 / 2: not supported.
+- [ ] **Steam: the games' pictures on the touch screen's cards** (branch
+  steam-card-art, not released, no version bump yet): Steam's store picture
+  (capsule_616x353, fetched once through the phone), else the program's
+  icon on its plate, else the plate; `src/art.js`, our own baseline JPEG
+  reader (`jpeg.js`) and icon reader (`ico.js`); tests in CI. Off the car
+  (2026-11-16): real capsules and the icons of CoD, Castle Crashers,
+  Terraria, Slay the Spire 2 drawn; 50-80 ms a tile on Node 8 with one CPU,
+  in the background. Still: the play bench end to end (fetched on install,
+  icons offline); then the car (asked first): how long a page's pictures
+  take on the Atom.
 - [ ] **Steam 0.2.1 on the car.** 0.2.0 on the car (2026-11-09): Vampire
   Survivors and Slay the Spire 2 run on ANV 22.3.7; Teslagrad launches (Vulkan,
   Run without Steam); Terraria on Wine Mono, 12 pictures/s on Vulkan against 6

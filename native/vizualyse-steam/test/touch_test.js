@@ -147,6 +147,45 @@ console.log('ok   the look: ' + STATES.length + ' states lint clean, four games 
     ' px; a full frame ' + fullMs.toFixed(1) + ' ms (Settings ' + setMs.toFixed(1) + '), a press ' + pressMs.toFixed(1) + ' ms (' + process.version + '); tile ' + tile.w + 'x' + tile.h);
 console.log('     ' + ['steam_library.png', 'steam_settings.png', 'steam_settings_sheet.png'].map((f) => path.join(OUT, f)).join('\n     '));
 
+/* ---- the games' pictures (art.js's, made here from synthetic ones) ---- */
+{
+    const art = require('../src/art.js');
+    const pic = (w, h, f) => { const b = Buffer.alloc(w * h * 4); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const c = f(x, y); b[(y * w + x) * 4] = c[0]; b[(y * w + x) * 4 + 1] = c[1]; b[(y * w + x) * 4 + 2] = c[2]; b[(y * w + x) * 4 + 3] = c[3]; } return { w: w, h: h, rgba: b }; };
+    const poster = pic(616, 353, (x, y) => [x * 255 / 616, 120 + (y % 40) * 3, 255 - y * 255 / 353, 255]);
+    const icon = pic(64, 64, (x, y) => ((x - 32) * (x - 32) + (y - 32) * (y - 32) < 900 ? [240, 200, 40, 255] : [0, 0, 0, 0]));
+    const made = {
+        tile: { 1794680: art.finish(art.cover(poster, view.TILE.w, view.TILE.h), true, false), 2868840: art.finish(art.onPlate(icon, view.TILE.w, view.TILE.h, view.plate(2868840), 96, 20), false, false),
+            504230: art.finish(art.cover(poster, view.TILE.w, view.TILE.h), true, true) },
+        thumb: { 1794680: art.finish(art.cover(poster, view.THUMB.w, view.THUMB.h), false, false) },
+    };
+    const withArt = (o) => M(Object.assign({ art: (id, which) => (made[which][id] ? { img: made[which][id], key: which + id } : null) }, o || {}));
+    [['pictures, a game running', withArt(), 'library'], ['pictures, nothing running', withArt({ game: null, running: false }), 'library'], ['pictures, page 2', withArt({ page: 1 }), 'library']].forEach((s) => {
+        const p = kit.lint(widgets(s[1], s[2]));
+        assert.deepStrictEqual(p, [], s[0] + ': ' + p.join('; '));
+    });
+    const la = widgets(withArt({ game: null, running: false }), 'library');
+    const ids = la.map((d) => d.id);
+    ['1794680', '2868840', '504230'].forEach((id) => {
+        assert.ok(ids.indexOf('art:' + id) >= 0 && ids.indexOf('art:' + id) < ids.indexOf('play:' + id), 'the picture under its tile ' + id);
+        assert.strictEqual(byId(la, 'play:' + id).under, undefined, 'no plate over the picture ' + id);
+    });
+    assert.strictEqual(ids.indexOf('art:1145360'), -1, 'no picture: none drawn');
+    assert.notStrictEqual(byId(la, 'play:1145360').under, undefined, 'no picture: the plate as before');
+    const card = widgets(withArt(), 'library');
+    assert.ok(byId(card, 'gameArt') && byId(card, 'title').x > view.THUMB.x + view.THUMB.w, 'the running game\'s thumb, its name after it');
+    assert.strictEqual(byId(widgets(withArt({ game: null, running: false }), 'library'), 'gameArt'), undefined, 'no game: no thumb');
+    const sa = new kit.Surface(F);
+    sa.render(card, null);
+    fs.writeFileSync(path.join(OUT, 'steam_library_art.png'), writePng(kit.AREA.w, kit.AREA.h, sa.cv.px));
+    const sb = new kit.Surface(F);
+    sb.render(la, null);
+    const tb = byId(la, 'play:2868840'), redraw = sb.render(la, { id: 'play:2868840', part: 0 });
+    assert.deepStrictEqual(redraw, [{ x: tb.x, y: tb.y, w: tb.w, h: tb.h }], 'a press on a pictured tile redraws that tile');
+    fs.writeFileSync(path.join(OUT, 'steam_library_art_pressed.png'), writePng(kit.AREA.w, kit.AREA.h, sb.cv.px));
+    console.log('ok   the pictures: under their tiles, the plate without one, the running game\'s thumb, a press on a pictured tile');
+    console.log('     ' + ['steam_library_art.png', 'steam_library_art_pressed.png'].map((f) => path.join(OUT, f)).join('\n     '));
+}
+
 /* ---- one picture at a time ---- */
 const clientPath = path.join(tmp, 'client.js');
 fs.writeFileSync(clientPath, `
