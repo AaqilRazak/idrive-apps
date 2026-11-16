@@ -166,6 +166,7 @@ class SteamTouch extends EventEmitter {
         }
         if (id === 'upscale') return a.upscale(String(value));
         if (id === 'enabled') return a.enable(!!value);
+        if (id === 'client') return a.client ? a.client(!!value) : null;
         return null;
     }
 }

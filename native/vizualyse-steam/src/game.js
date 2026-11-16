@@ -32,6 +32,7 @@ const screen = require('./screen.js');
 const { Perf, keepLine } = require('./perf.js');
 const { WineLog } = require('./wine_log.js');
 const { CARPLAY } = require('./speakers.js');
+const client = require('./client.js');
 /* the perf lines kept beside the journal's (perf.keepLine) */
 const PERF_FILE = path.join(env.STATE_DIR, 'perf.log');
 
@@ -283,13 +284,15 @@ class Game extends EventEmitter {
         this._startSound();
         this._startPads();
         const exe = path.join(o.dir, o.exe);
-        const e = env.wineEnv(o.launch, o.appId, DISPLAY, !!o.vulkan, o.detail, !!o.iris, o.engine);
+        let e = env.wineEnv(o.launch, o.appId, DISPLAY, !!o.vulkan, o.detail, !!o.iris, o.engine);
+        /* Steam's own client (client.js): started straight, not through Proton's steam.exe shim */
+        if (o.client) e = client.clientEnv(e);
         const libs = e.LD_LIBRARY_PATH;
         delete e.LD_LIBRARY_PATH;
         /* into the memory cgroup first, then exec: every Wine process stays in
          * it; LD_LIBRARY_PATH only on Wine's exec (the shell is the unit's) */
         const cg = o.cgroup ? 'echo $$ > ' + o.cgroup + '/cgroup.procs 2>/dev/null; ' : '';
-        const argv = o.launch.argv.concat([exe]).concat(o.args || []);
+        const argv = (o.client ? o.launch.argv.slice(0, 2) : o.launch.argv).concat([exe]).concat(o.args || []);
         this._log('game: ' + o.name + ': ' + argv.slice(2).join(' ') + ' (in ' + path.dirname(exe) + ')');
         const wine = spawn('/bin/sh', ['-c', cg + 'LD_LIBRARY_PATH=' + libs + ' exec "$0" "$@"'].concat(argv), {
             env: e, cwd: path.dirname(exe), uid: o.uid, gid: o.gid, detached: true,
@@ -323,7 +326,17 @@ class Game extends EventEmitter {
             this.wine = null;
             wlog.end();
             this._log('game: Wine exited (' + (sig || code) + ') after ' + Math.round((Date.now() - this.since) / 1000) + ' s');
-            this.stop(this.state === 'starting' ? 'the game ended before it drew anything (exit ' + (sig || code) + ')' : null);
+            /* Steam's client restarts itself after an update: the one we started
+             * goes, the client goes on; the session lasts while a Steam.exe does */
+            if (o.client && !this.stopping && client.alive(o.cgroup, o.uid)) {
+                this._log('game: Steam\'s client goes on (it restarted itself)');
+                this.clientWatch = setInterval(() => {
+                    if (this.stopping) { clearInterval(this.clientWatch); return; }
+                    if (!client.alive(o.cgroup, o.uid)) { clearInterval(this.clientWatch); this.stop(o.ended ? o.ended() : null); }
+                }, 2000);
+                return;
+            }
+            this.stop(this.state === 'starting' && !o.client ? 'the game ended before it drew anything (exit ' + (sig || code) + ')' : (o.ended ? o.ended() : null));
         });
     }
 
@@ -392,6 +405,7 @@ class Game extends EventEmitter {
     stop(why) {
         if (this.stopping) return;
         this.stopping = true;
+        if (this.clientWatch) clearInterval(this.clientWatch);
         if (why) this.note = why;
         const o = this.o;
         const wineDone = new Promise((resolve) => {

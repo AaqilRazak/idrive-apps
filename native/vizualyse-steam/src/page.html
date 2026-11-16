@@ -99,6 +99,13 @@
   <p class="dim">Picture, frames and memory apply from the next game. More memory lets bigger games run but leaves less to the car's own screens. Upscaling applies at once: FSR sharpens a small picture (896x320, say) as it is enlarged to the screen, for some of the graphics chip's time.</p>
   <dl id="info" class="dim"></dl>
 </div>
+
+<div class="card">
+  <h2>Steam client</h2>
+  <div class="row"><button id="client">Steam client: off</button><button id="clientSignIn" class="hidden">Sign in on the car's screen</button></div>
+  <p id="clientState"></p>
+  <p class="dim">Off (light): a game starts by itself, with Run without Steam and Remove Steam DRM as you set them. On: games start in Steam's own Windows client on the car, signed in with your account: for games whose Steam DRM the car can't take off (Call of Duty: World at War, say). It costs about 2 GB of memory while a game runs (most of it, Steam's own screens, set aside to swap once the game starts) and a 250 MB download the first time. Turning it on installs it and shows its sign-in on the car's screen: scan the QR code there with the Steam app on your phone, parked. A game's first start in it may ask for its extras (DirectX, an anti-cheat's licence) on the car's screen.</p>
+</div>
 <p id="msg" class="err"></p>
 
 <script>
@@ -351,6 +358,11 @@ function render(s) {
   $('whereNote').textContent = ch.usb.some((u) => u.fat32 && 'usb:' + u.id === st.where)
     ? 'This stick is FAT32: a game with a file over 4 GB can\'t go on it (reformat it as exFAT). Games on a stick run while it is plugged in; it stays readable by the car\'s media player.' : '';
   $('sound').textContent = 'Sound: ' + (st.sound ? 'on' : 'off');
+  const c = s.client || {};
+  $('client').textContent = 'Steam client: ' + (c.on ? 'on' : 'off');
+  $('clientSignIn').classList.toggle('hidden', !(c.on && c.installed && !c.account && !c.step));
+  $('clientState').textContent = c.step ? 'Now: ' + c.step : !c.on ? (c.installed ? 'Installed, not in use' + (c.account ? ' (signed in as ' + c.account + ')' : '') : '')
+    : c.account ? 'Signed in as ' + c.account + ': games start in it' : (c.note || (c.installed ? 'Not signed in' : 'Not installed yet'));
   if (document.activeElement !== $('vol')) $('vol').value = st.volume;
   $('info').textContent = 'Uplink: ' + s.uplink + ' - tool: ' + s.bundle + (s.prefixNote ? ' - ' + s.prefixNote : '');
 }
@@ -372,6 +384,8 @@ $('mem').onchange = () => api('/api/settings', { memMb: Number($('mem').value) }
 $('region').onchange = () => api('/api/settings', { cellId: Number($('region').value) }).then(() => $('region').blur(), () => null);
 $('where').onchange = () => api('/api/settings', { where: $('where').value }).then(() => $('where').blur(), () => null);
 $('sound').onclick = () => api('/api/settings', { sound: !(last && last.settings.sound) }).catch(() => null);
+$('client').onclick = () => api('/api/settings', { client: !(last && last.client && last.client.on) }).catch(() => null);
+$('clientSignIn').onclick = () => api('/api/settings', { clientSignIn: true }).catch(() => null);
 $('vol').onchange = () => api('/api/settings', { volume: Number($('vol').value) }).then(() => $('vol').blur(), () => null);
 
 /* the library's buttons; its Options panel stops the redraw while open */

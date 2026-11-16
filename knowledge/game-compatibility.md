@@ -197,14 +197,14 @@ load:
 |---|---|
 | Terraria | XNA, .NET Framework (no Wine Mono): "Wine Mono is not installed", exit 255 on the car (2026-11-08). Wine Mono 11.3.0 with FNA is in GE-Proton (planned back in) **2026-11-09, 0.2.0 (Wine Mono):** launches; about 12 pictures/s in game on Vulkan (DXVK), 6 on iris and 6 on i965 (WineD3D); iris and i965 start faster than Vulkan on its first run; its picture slightly cut at the top at 960x540 (0.2.1 fits it). |
 | Castle Crashers | SteamStub 3.1 x86 on castle.exe (`.bind`): exits 53 at once without help (2026-11-08). **Remove Steam DRM** (`steamstub.js`) + Run without Steam: on the bench (2026-11-16, Steam 0.2.4's tool, the exe unwrapped with 0.3.1's `unwrapExe`) it starts, runs at 30 fps and draws its title screen on DXVK (lavapipe). Not yet on the car. |
-| Call of Duty: World at War | SteamStub 1 / 2 on CoDWaW.exe and CoDWaWmp.exe (2026-11-16, bench): not taken off; the phone page says so. |
+| Call of Duty: World at War | SteamStub 1 / 2 on CoDWaW.exe and CoDWaWmp.exe (2026-11-16, bench): not taken off; the phone page says so. **With the Steam client setting** (Valve's client in the prefix, signed in; the play bench, 2026-11-16): starts (its DRM passes), nothing downloaded; its first start runs its DirectX setup and PunkBuster's licence on the screen (declined: it still runs). Not yet on the car. |
 | Defy Gravity | XNA, .NET Framework (no Wine Mono) |
 | Celeste | FNA on .NET Framework (Windows build) |
 | Rogue Legacy | XNA, .NET Framework |
 | Hades | D3D11 / Vulkan only, GPU-heavy; no OpenGL path |
 | Cuphead | Heavy D3D11 and sprite memory; minimum GPU above the unit's |
 | Any D3D12 / Vulkan-only game | No Vulkan on the 4.14 kernel ([browser.md](browser.md)) |
-| Games with anti-cheat, online-only, SteamStub 1 / 2 | No Steam client; gbe_fork doesn't cover DRM wrappers; Remove Steam DRM takes off variant 3 only |
+| Games with anti-cheat, online-only | gbe_fork doesn't cover them; anti-cheat needs more than a Steam client. SteamStub 1 / 2: the Steam client setting (above) |
 | Games for Windows Live titles | GFWL doesn't run here |
 | 3D games with a GTX 4xx / HD 5xxx or newer minimum | Far past the HD 505 before Wine's overhead |
 | Apex Legends, PUBG, SMITE / SMITE 2, Counter-Strike 2, Team Fortress 2, Counter-Strike: Source, Day of Defeat / Source, Team Fortress Classic, Deathmatch Classic, Ricochet, HL2: Deathmatch, HL Deathmatch: Source, Rainbow Six Siege, For Honor, Rust, Dead by Daylight, Warframe, Warface: Clutch, Brawlhalla, Divine Knockout, Realm Royale, Ring of Elysium, Quake Champions, Chivalry, Mirage, PAYDAY 2, Vermintide 2, Evolve Stage 2, WildStar, ELYON, Echo of Soul, Rocket League, Super Auto Pets, Hand of the Gods, Moirai, Guns of Icarus, Blockstorm, Offensive Combat: Redux, Team Racing League | Online-only or anti-cheat |
