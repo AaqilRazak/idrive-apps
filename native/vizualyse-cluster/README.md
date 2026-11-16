@@ -108,8 +108,8 @@ it when the app is opened: its empty screen state, then
 `{"cmd":"picker","on":true}`; BACK, HOME, another app or a pop-up make it
 send `on: false`. The **List** button (top right) hides the picker and
 sends the app `{"ev":"list"}`: the app goes back to its iDrive list. The
-picker shows only while the car is not known to move (hidden above 3 km/h,
-as Browser and Steam); the app then shows its list.
+picker shows parked or driving (since 0.4.1: still pictures, picked by
+touch); Try and the demo on the cluster stay parked only.
 
 - **The screen** (`src/picker_view.js`): two tabs in the kit's frame.
   *Themes*: a large preview of the chosen family (swipe it for the next),

@@ -13,8 +13,8 @@ README](../../native/vizualyse-steam/README.md#the-touch-screen)) by itself
 while parked: the running game with **Show on the screen** and **Stop the
 game**, the library four games a page, the download, and Settings (the
 picture's shape and size, Upscaling, Steam on / off, the phone page's QR
-code). Its **List** button (top right), BACK or the car starting to move
-bring the page back: the iDrive list, all of it usable with the controller.
+code), parked or driving (the game's picture is parked only). Its **List**
+button (top right) or BACK bring the page back: the iDrive list, all of it usable with the controller.
 The list's first row, **Touch screen**, opens the touch screen again. The
 handling is the platform's `app/touch_mode`.
 
@@ -79,7 +79,7 @@ and `{"ev":"list"}` for the touch screen's List button; the app sends
 
 ## Building and testing
 
-- `node tools/make_page.js vizualyse_steam@0.2.0` writes `application.xml`
+- `node tools/make_page.js vizualyse_steam@0.2.1` writes `application.xml`
   and `uiDescription.json` from one list; `node tools/make_icon.js <png>`
   the tile icon (a game controller outline).
 - `node tools/test_page.js` runs the app against a fake SDK, HMI and tool

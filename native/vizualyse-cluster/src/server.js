@@ -85,7 +85,6 @@ function setSpeed(kmh) {
     if (settings.source === 'demo' && !demoAllowed()) { settings.source = 'car'; saveSettings(); log('source: demo stopped (the car is moving)'); }
     if (moving() === true) {
         if (trial) { log('try: ended (the car is moving)'); endTrial(true); }
-        if (picker && picker.shown()) picker.hide('the car is moving');
     }
 }
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
@@ -257,7 +256,6 @@ function command(c) {
     if (c.cmd === 'disable') { endTrial(false); settings.enabled = false; saveSettings(); hide('turned off'); return null; }
     if (c.cmd === 'picker') {
         if (!c.on) { picker.hide('the app hid it'); return null; }
-        if (moving() === true) return 'only while parked';
         return picker.show();
     }
     if (c.cmd === 'try') return tryTheme(c.id);

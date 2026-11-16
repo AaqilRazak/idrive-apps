@@ -20,8 +20,8 @@
  * - The touch screen (touch.js, the platform's touch kit): the iDrive app's
  *   controls by touch in the central screen's app area, while the app's
  *   screen state is open ({"cmd":"touch","on":true}); only where mgu-render
- *   is installed, only while parked (the app sends the speed), and never
- *   with a stream on this screen (the same mgu-render client name: one at a
+ *   is installed, parked or driving (map settings while driving, as the
+ *   car's own controls), and never with a stream on this screen (the same mgu-render client name: one at a
  *   time; it comes back when that stream ends).
  *
  *   node server.js     (root: the render socket, ALSA, nftables)
@@ -61,7 +61,8 @@ const TOUCH_PYTHON = process.env.CAST_PYTHON || PYTHON;
 const TOUCH_IFACE = process.env.CAST_TOUCH_IFACE || 'vlan73';
 const TOUCH_SRC = process.env.CAST_TOUCH_SRC || '160.48.199.115';
 const TOUCH_FILE = process.env.CAST_TOUCH_FILE || '';
-/* the touch screen only while parked: above this the car moves */
+/* above this the car moves (the status's moving: the touch screen says so;
+ * it stays up while driving, as the car's own controls do) */
 const MAX_KMH = 3;
 /* The CarPlay preview (carplay_screen.previewArgs): a second ffmpeg output
  * only where the touch screen can show it (mgu-render installed). It shares
@@ -503,7 +504,6 @@ const touchTimer = setInterval(() => { if (touch.shown()) { freshStatus(); touch
 function consoleUp() { return !!(player && player.opts.output === 'console'); }
 function showTouch() {
     if (!touchAvailable) return 'the touch screen needs mgu-render';
-    if (moving() === true) return 'only while parked';
     touchWanted = true;
     if (consoleUp()) { log('touch: after the stream on this screen'); return null; }
     freshStatus();
@@ -512,7 +512,7 @@ function showTouch() {
 function hideTouch(why) { touchWanted = false; touch.hide(why); }
 /* a stream on this screen ended: the touch screen again, if the app still wants it */
 function resumeTouch() {
-    if (!touchWanted || touch.shown() || consoleUp() || moving() === true || !touchAvailable || stopping) return;
+    if (!touchWanted || touch.shown() || consoleUp() || !touchAvailable || stopping) return;
     log('touch: back after the stream on this screen');
     freshStatus();
     touch.show();
@@ -716,7 +716,6 @@ function command(c) {
         const kmh = Number(c.kmh);
         if (!isFinite(kmh) || kmh < 0) return 'speed: a number of km/h';
         car.kmh = kmh; car.at = Date.now();
-        if (moving() === true && (touch.shown() || touchWanted)) { log('touch: the car moves: hidden'); hideTouch('the car is moving'); }
         return null;
     }
     if (c.cmd === 'touch') {

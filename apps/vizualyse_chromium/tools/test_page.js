@@ -14,13 +14,13 @@
  * entered with the tool there and parked, the touch screen opens by itself
  * (the empty screen state, then "ui" once it is visible) and its List corner
  * ({"ev":"list"}) closes the state to the page; the Touch screen row opens
- * it again and the car moving closes it; connected, the link is written and
+ * it again and stays while the car moves; connected, the link is written and
  * shown as a QR PNG (a new file per link, the old handle released), the page
  * and the GPU lines; Show (the screen state with the browser at once), Home
  * page, Reload and Back send theirs; a pop-up (focus lost 300 ms) and
  * leaving the page send "ui" off, a focus blip does not; the car's speed (a
  * fake Vehicle2) goes to the tool once a second, also with the page
- * hidden; "only while parked"; a failed command's error; installing,
+ * hidden; "only while parked" (Show off, Touch screen on); a failed command's error; installing,
  * starting, a software WebGPU; on / off; the tool going away.
  */
 const assert = require('assert');
@@ -432,19 +432,25 @@ async function main() {
     await until('ui off sent on BACK', () => uiOff() === hides + 1, 1500);
     console.log('ok   a pop-up (focus lost 300 ms) and BACK hide the browser (ui off); a focus blip does not');
 
-    /* the Touch screen row: the screen state and the touch screen; the car moving: the page back */
+    /* the Touch screen row: the screen state and the touch screen; the car moving: it stays */
     await sleep(450);
     byName.browserTouch.emit('action');
     await until('the screen state for the touch screen', () => opened.length === 3);
     await until('the touch screen again', () => st.touch && uiOn(false) === 3);
-    st = Object.assign({}, st, { moving: true, speed: 30, touch: false, touchWanted: false });
+    const closedBefore = closed.length, offBefore = uiOff();
+    st = Object.assign({}, st, { moving: true, speed: 30 });
     tool.broadcast();
-    await until('the page back when the car moves', () => closed.length === 2);
-    await until('Touch screen off while moving', () => byName.browserTouch.enabled === false && byName.browserTouch.text === 'Touch screen (only while parked)');
-    st = Object.assign({}, st, { moving: false, speed: null });
+    await sleep(1000);
+    assert.strictEqual(closed.length, closedBefore, 'the screen state stays when the car moves');
+    assert.strictEqual(uiOff(), offBefore, 'the touch screen not hidden when the car moves');
+    /* BACK: the page; the row on while moving */
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('ui off on BACK', () => uiOff() === offBefore + 1, 1500);
+    await until('Touch screen on while moving', () => byName.browserTouch.enabled === true && byName.browserTouch.text === 'Touch screen');
+    st = Object.assign({}, st, { moving: false, speed: null, touch: false, touchWanted: false });
     tool.broadcast();
-    await until('Touch screen on again', () => byName.browserTouch.enabled === true && byName.browserTouch.text === 'Touch screen');
-    console.log('ok   the Touch screen row opens it again; the car moving closes it to the page');
+    console.log('ok   the Touch screen row opens it again; it stays while the car moves, the row on');
 
     /* the HMI won't open the screen state: the browser goes over the main page, its buttons off */
     openFails = true;
@@ -472,12 +478,12 @@ async function main() {
     await until('speed 30 sent', () => received.some((c) => c.cmd === 'speed' && c.kmh === 30), 3000);
     st = Object.assign({}, st, { moving: true, speed: 30, shown: false });
     tool.broadcast();
-    await until('moving shown', () => /^Only while parked - the car is moving \(30 km\/h\)/.test(S.text || '') && byName.browserShow.enabled === false && byName.browserTouch.enabled === false);
+    await until('moving shown', () => /^Only while parked - the car is moving \(30 km\/h\)/.test(S.text || '') && byName.browserShow.enabled === false && byName.browserTouch.enabled === true);
     st = Object.assign({}, st, { moving: false, speed: 0 });
     speedRaw = 0;
     tool.broadcast();
     await until('ready again', () => /^Ready/.test(S.text || '') && byName.browserShow.enabled === true);
-    console.log('ok   the speed goes to the tool once a second (none while invalid); "only while parked" shows, Show and Touch screen off');
+    console.log('ok   the speed goes to the tool once a second (none while invalid); "only while parked" shows, Show off, Touch screen on');
 
     refuse = 'the browser is not running';
     await sleep(450);

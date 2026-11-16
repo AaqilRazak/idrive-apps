@@ -55,13 +55,14 @@ one label, nothing to press) and sends `touch` once it is visible. Should
 the HMI not open the screen state within 3 s, the touch screen goes over
 the main page (its buttons disabled) and the log says why. BACK, HOME,
 another app, and a pop-up taking the focus for 300 ms hide it (`touch`
-with `on: false`). The tool's `{"ev":"list"}` (its List button) and the car
-starting to move close the screen state. A stream played on this screen
+with `on: false`). The tool's `{"ev":"list"}` (its List button) closes the
+screen state. A stream played on this screen
 hides the touch screen until it ends (the tool's; the screen state stays).
 
 The app reads `Vehicle2.statusCarSpeed2` every second (`src/vehicle_speed.js`,
 the platform's `app/vehicle_speed`) and sends `{"cmd":"speed","kmh":N}`;
-the tool hides the touch screen above 3 km/h and won't show it.
+the touch screen shows it. The touch screen stays while driving (map
+settings on the move, as the car's own controls; since 0.4.1).
 
 ## The socket
 
@@ -86,8 +87,8 @@ writes the page's application.xml and uiDescription.json from one list.
 ```sh
 node tools/build.js          # the source package; the unit builds the app
 node tools/test_page.js      # the page against a fake SDK and HMI and the tool's real control socket
-node tools/make_page.js vizualyse_cast@0.4.0
-node tools/make_icon.js vizualyse_cast@0.4.0/rhmiData/variantGroups/Common/images/vizualyse_cast_icon.png
+node tools/make_page.js vizualyse_cast@0.4.1
+node tools/make_icon.js vizualyse_cast@0.4.1/rhmiData/variantGroups/Common/images/vizualyse_cast_icon.png
 ```
 
 The structure (SDK use, tile, visibility, the QR handles) follows

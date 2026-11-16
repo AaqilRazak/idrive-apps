@@ -18,7 +18,8 @@
  *   memory setting; its pictures go into mgu-render's frame file, shown in
  *   the app area (screen.js); its sound into SmartXbar (pcm_play.py).
  * - Only while parked: the iDrive app sends the speed; above 3 km/h the game
- *   is hidden and can't be shown (it keeps running; Stop ends it).
+ *   is hidden and can't be shown (it keeps running; Stop ends it). The
+ *   touch screen stays and comes back in its place: it works while driving.
  * - The touch screen (touch_screen.js, the platform's touch kit): the
  *   library, the running game, Settings and the phone page's QR code in the
  *   app area, while the iDrive app's screen state is open; the game's
@@ -41,6 +42,7 @@ const { URL } = require('url');
 const env = require('./env.js');
 const unpack = require('./unpack.js');
 const steam = require('./steam.js');
+const steamstub = require('./steamstub.js');
 const { Game } = require('./game.js');
 const { Speakers } = require('./speakers.js');
 const usb = require('./usb.js');
@@ -499,10 +501,9 @@ function setSpeed(kmh) {
     const v = Number(kmh);
     vehicle.kmh = isFinite(v) ? v : null;
     vehicle.at = Date.now();
-    if (moving()) {
-        if (wantShown || screen.shown()) hide('driving (' + v.toFixed(0) + ' km/h)');
-        touchUi.moved();
-    }
+    /* the game's picture goes; the touch screen comes back in its place
+     * (hide: touchUi.gameGone) and works while driving */
+    if (moving() && (wantShown || screen.shown())) hide('driving (' + v.toFixed(0) + ' km/h)');
 }
 
 /* ---- the touch screen (touch_screen.js, touch_view.js) -------------------------
@@ -524,7 +525,7 @@ function touchLine() {
     if (mem.note && mem.oomAt && Date.now() - Date.parse(mem.oomAt) < 120000) {
         return { tone: 'warn', text: 'Out of memory: the game needed more than ' + settings.memMb + ' MB (phone page: Memory)' };
     }
-    if (g && moving()) return { tone: 'warn', text: 'Only while parked: the car is moving' };
+    if (g && moving()) return { tone: 'warn', text: 'The game shows only while parked: the car is moving' };
     if (g && g.state === 'starting') return { tone: 'live', text: 'Starting ' + g.o.name + ' (this can take a minute)...' };
     if (g) return { tone: 'ok', text: g.o.name + ' is running. Show puts it on the screen' };
     if (askedOffNote) return { tone: 'warn', text: 'The game ' + askedOffNote };
@@ -582,7 +583,7 @@ const touchUi = new SteamTouch({
     dir: HERE, clientPath: RENDER_CLIENT, log: log,
     touch: { python: PYTHON, iface: TOUCH_IFACE, src: TOUCH_SRC, file: TOUCH_FILE,
         cmd: process.env.STEAM_UI_TOUCH_CMD ? JSON.parse(process.env.STEAM_UI_TOUCH_CMD) : null },
-    state: touchModel, moving: moving, gameShown: () => screen.shown(),
+    state: touchModel, gameShown: () => screen.shown(),
     actions: {
         show: () => show(),
         stop: () => stopGame('stopped on the touch screen'),
@@ -661,7 +662,8 @@ function added(appId, dir) {
     library[appId] = { name: name, dir: dir, exe: exe, args: old.args || steam.defaultArgs(eng), engine: eng,
         sizeMb: Math.round(steam.du(dir) / 1048576), installedAt: old.installedAt || new Date().toISOString(), updatedAt: new Date().toISOString(),
         noSteam: !!old.noSteam, steamApi: steamApiFiles(dir).length, arch: exe ? steam.arch(dir, exe) : null,
-        steamStub: exe ? steam.steamStub(dir, exe) : null };
+        noDrm: !!old.noDrm };
+    Object.assign(library[appId], stubOf(dir, exe));
     /* Vulkan: a choice made by hand stays; none, the default (vulkanOn). iris
      * and Detail stay too (an update or a check of the files kept neither) */
     if (old.vulkan === true || old.vulkan === false) library[appId].vulkan = old.vulkan;
@@ -669,9 +671,12 @@ function added(appId, dir) {
     if (old.detail) library[appId].detail = old.detail;
     saveLibrary();
     log('library: ' + name + ' (' + appId + '): ' + (exe || 'no program found') + (eng ? ', ' + eng : '') + ', ' + library[appId].sizeMb + ' MB' +
-        (library[appId].steamStub ? ', Steam\'s DRM wrapper (SteamStub) on its program: it won\'t start without the Steam client' : ''));
+        (library[appId].steamStub ? ', Steam\'s DRM wrapper (SteamStub' + drmName(library[appId].drm) + ') on its program: ' +
+            (library[appId].drm && library[appId].drm.supported ? 'Remove Steam DRM can take it off' : 'not one we can take off yet') : ''));
     /* an update or a check put Steam's own steam_api back: the emulator again */
     if (old.noSteam) { const e = noSteam(appId, true); if (e) log('no-steam: ' + e); }
+    /* and Steam's wrapped program: unwrapped again */
+    if (old.noDrm) { const e = noDrm(appId, true); if (e) log('no-drm: ' + e); }
 }
 
 /* ---- Run without Steam: gbe_fork (Goldberg's Steam emulator) ----------------
@@ -682,7 +687,8 @@ function added(appId, dir) {
  * its DLL): the app id, the account's name, no networking (no LAN
  * broadcasts on the car's network). Off: the originals back, our settings
  * gone. Achievements and cloud saves stay local; a game wrapped in Steam's
- * DRM (SteamStub) still won't start. Off by default, per game. */
+ * DRM (SteamStub) also needs Remove Steam DRM (below). Off by default, per
+ * game. */
 const GBE = path.join(env.RUNTIME, 'goldberg');
 const API_DLLS = { 'steam_api64.dll': 'x64/steam_api64.dll', 'steam_api.dll': 'x86/steam_api.dll' };
 const ORIG = '.vzs-orig';
@@ -781,6 +787,56 @@ function noSteam(appId, on) {
     return null;
 }
 
+/* ---- Remove Steam DRM: SteamStub taken off the program (steamstub.js) -------
+ * Steam's wrapped program kept beside it as <exe>.vzs-orig (as Run without
+ * Steam keeps the DLLs), the unwrapped one in its place; off puts Steam's
+ * back. An update or a check that brings the wrapped one back: unwrapped
+ * again (added()). Usually wanted with Run without Steam, which stays a
+ * choice of its own. Off by default, per game. */
+
+/* SteamStub on the program as Steam ships it (the kept one, once unwrapped) */
+function stubOf(dir, exe) {
+    if (!exe) return { steamStub: null, drm: null };
+    const rel = fs.existsSync(path.join(dir, exe + steamstub.ORIG)) ? exe + steamstub.ORIG : exe;
+    const has = steam.steamStub(dir, rel);
+    let drm = null;
+    if (has) {
+        try {
+            const d = steamstub.detect(path.join(dir, rel));
+            drm = { variant: d.variant, arch: d.arch, supported: d.supported, guessed: d.guessed, why: d.why };
+        } catch (e) { drm = { variant: null, supported: false, why: e.message }; }
+    }
+    return { steamStub: has, drm: drm };
+}
+function drmName(d) { return d && d.variant ? ' ' + d.variant + (d.arch ? ' ' + d.arch : '') : ''; }
+
+function noDrm(appId, on) {
+    const g = library[appId];
+    if (!g) return 'not in the library';
+    if (game && game.o.appId === Number(appId) && game.state !== 'ended') return 'stop the game first';
+    if (!g.exe) return 'no program found';
+    const stick = gameStick(g);
+    if (stick) {
+        if (!present(g)) return 'it is on the USB stick ' + stick + ': plug it in';
+        try { attachStick(stick); } catch (e) { return 'the USB stick: ' + e.message; }
+    }
+    const f = path.join(g.dir, g.exe);
+    let r;
+    try { r = steamstub.unwrapExe(f, on); } catch (e) { return 'Remove Steam DRM: ' + e.message; }
+    if (r.done === 'unwrapped') { ownIfCan(f); ownIfCan(f + steamstub.ORIG); }
+    g.noDrm = !!on;
+    Object.assign(g, stubOf(g.dir, g.exe));
+    saveLibrary();
+    log('no-drm: ' + g.name + ' (' + appId + '): ' + ({
+        unwrapped: 'SteamStub' + drmName(r.info) + ' taken off ' + g.exe + (r.info && r.info.bindRemoved ? ' (.bind gone)' : ' (.bind kept)') + ', Steam\'s kept as ' + path.basename(f) + steamstub.ORIG +
+            (g.noSteam ? '' : '; Run without Steam is off: the game may still want the Steam client'),
+        already: 'already unwrapped',
+        restored: 'Steam\'s wrapped ' + g.exe + ' back',
+        nothing: 'nothing to put back',
+    })[r.done]);
+    return null;
+}
+
 function removeGame(appId) {
     const g = library[appId];
     if (!g) return 'not in the library';
@@ -809,10 +865,12 @@ function setGameOptions(appId, b) {
     if (b.exe !== undefined) {
         const exes = steam.findExes(g.dir, g.name);
         if (!exes.some((x) => x.rel === b.exe)) return 'no such program in the game\'s folder';
+        /* another program: Steam's wrapped one back in place of the one we unwrapped */
+        if (b.exe !== g.exe && g.noDrm) { const e = noDrm(appId, false); if (e) return e; }
         g.exe = b.exe;
         g.engine = steam.engine(g.dir, g.exe);
         g.arch = steam.arch(g.dir, g.exe);
-        g.steamStub = steam.steamStub(g.dir, g.exe);
+        Object.assign(g, stubOf(g.dir, g.exe));
     }
     if (b.args !== undefined) {
         const a = String(b.args).trim();
@@ -849,7 +907,8 @@ function setGameOptions(appId, b) {
         g.detail = String(b.detail);
     }
     saveLibrary();
-    if (b.noSteam !== undefined && !!b.noSteam !== !!g.noSteam) return noSteam(appId, !!b.noSteam);
+    if (b.noSteam !== undefined && !!b.noSteam !== !!g.noSteam) { const e = noSteam(appId, !!b.noSteam); if (e) return e; }
+    if (b.noDrm !== undefined && !!b.noDrm !== !!g.noDrm) return noDrm(appId, !!b.noDrm);
     return null;
 }
 
@@ -920,12 +979,13 @@ function gameArch(g) {
     if (g.arch === undefined && g.exe) { g.arch = steam.arch(g.dir, g.exe); saveLibrary(); }
     return g.arch || null;
 }
-/* SteamStub on its program, read once (a game added before 0.2.0 too) */
+/* SteamStub on its program, read once (a game added before 0.2.0 too; its
+ * variant for one added before Remove Steam DRM) */
 function gameStub(g) {
     /* null (unreadable: a stick that is out) is asked again next time, not kept */
-    if ((g.steamStub === undefined || g.steamStub === null) && g.exe) {
-        const s = steam.steamStub(g.dir, g.exe);
-        if (s !== null) { g.steamStub = s; saveLibrary(); }
+    if ((g.steamStub === undefined || g.steamStub === null || (g.steamStub && g.drm === undefined)) && g.exe) {
+        const s = stubOf(g.dir, g.exe);
+        if (s.steamStub !== null) { Object.assign(g, s); saveLibrary(); }
     }
     return !!g.steamStub;
 }
@@ -1170,7 +1230,9 @@ function status() {
                 /* steamApi: its steam_api DLLs (unknown for a game added before 0.1.4) */
                 noSteam: !!x.noSteam, steamApi: x.steamApi === undefined ? null : x.steamApi,
                 vulkan: vulkanOn(x), vulkanDefault: vulkanDefault(x), iris: irisChosen(x), irisDefault: env.irisMissing().length === 0, arch: gameArch(x), detail: x.detail || 'normal',
-                steamStub: gameStub(x) };
+                /* steamStub: Steam's DRM wrapper on its program as shipped; drm: its
+                 * variant and whether we can take it off; noDrm: taken off */
+                steamStub: gameStub(x), drm: x.drm || null, noDrm: !!x.noDrm };
         }).sort((a, b) => a.name.localeCompare(b.name)),
         game: game ? { appId: game.o.appId, name: game.o.name, state: game.state, title: game.title, since: new Date(game.since).toISOString(),
             pictures: game.stats.pictures, fps: game.stats.fps, gpuBuffers: !!game.gpuBuffers, sinkMs: game.stats.ms,

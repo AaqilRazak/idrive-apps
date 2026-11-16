@@ -271,18 +271,24 @@ function fakeRun() {
     fs.writeFileSync(path.join(OUT, 'cast_tool.png'), writePng(1790, 638, fs.readFileSync(LOG + '.1.rgba')));
     console.log('ok   Cast to cluster off and on by its toggle; ' + px.length + ' parts redrawn (' + px.map((o) => o.area).join(', ') + ' px)');
 
-    /* the car moves: hidden, refused; parked again: shown */
+    /* the car moves: the touch screen stays (map settings on the move);
+     * shown when asked while moving; parked again: still up */
+    const closes = logged().filter((o) => o.op === 'close').length;
     send({ cmd: 'speed', kmh: 40 });
-    await until(() => statusNow.touch === false && statusNow.moving === true, 3000, 'hidden while moving');
-    assert(logged().some((o) => o.op === 'close'), 'its mgu-render client closed');
+    await until(() => statusNow.moving === true, 3000, 'moving in the status');
+    await wait(1200);
+    assert(statusNow.touch === true, 'still shown while moving');
+    assert(logged().filter((o) => o.op === 'close').length === closes, 'its mgu-render client kept');
     errors = [];
+    send({ cmd: 'touch', on: false });
+    await until(() => statusNow.touch === false, 3000, 'hidden by the app');
     send({ cmd: 'touch', on: true });
-    await until(() => errors.length, 3000, 'refused while moving');
-    assert(/parked/.test(errors[0]), errors[0]);
+    await until(() => statusNow.touch === true, 3000, 'shown while moving');
+    assert(!errors.length, 'not refused while moving: ' + errors.join('; '));
     send({ cmd: 'speed', kmh: 0 });
-    send({ cmd: 'touch', on: true });
-    await until(() => statusNow.touch === true, 3000, 'shown again, parked');
-    console.log('ok   hidden when the car moves, refused while it moves, shown again parked');
+    await until(() => statusNow.moving === false, 3000, 'parked again');
+    assert(statusNow.touch === true, 'still shown parked');
+    console.log('ok   the touch screen stays while the car moves, and shows when asked while moving');
 
     /* the List corner: {"ev":"list"}, hidden */
     await wait(300);

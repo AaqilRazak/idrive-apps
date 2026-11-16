@@ -6,7 +6,8 @@
  *
  * The touch screen first: entered, the app opens its empty screen state and
  * the tool's touch screen (the theme picker) goes over it; its List corner,
- * BACK or the car moving bring this page back (platform app/touch_mode).
+ * BACK bring this page back (platform app/touch_mode). Parked or driving
+ * (Try, on the cluster, stays parked only).
  *
  * One LT_State_Wide page, all of it usable with the iDrive controller: the
  * status; Touch screen (the picker again); one row per theme family
@@ -289,11 +290,11 @@ class ClusterApp extends OnlineApp {
         /* while the picker covers the page, nothing under it can be pressed */
         const covered = this._touch ? this._touch.covered() : c.shown();
         this._write(N.status, c.statusText());
-        this._write(N.pick, c.moving() ? 'Touch screen (only while parked)' : 'Touch screen');
+        this._write(N.pick, 'Touch screen');
         this._write(N.mode, up ? c.modeText() : 'Sport or Comfort');
         this._write(N.cover, "The car's strip under the theme: " + (c.covered() ? 'covered (black)' : 'shown'));
         this._write(N.enable, 'Cluster themes: ' + (up ? (on ? 'on' : "off (the car's own cluster)") : 'not running'));
-        this._setEnabled(N.pick, up && !covered && !c.moving());
+        this._setEnabled(N.pick, up && !covered);
         this._setEnabled(N.mode, up && !covered);
         this._setEnabled(N.cover, up && !covered);
         this._setEnabled(N.enable, up && !covered);

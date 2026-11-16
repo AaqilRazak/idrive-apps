@@ -18,7 +18,8 @@
  *     Settings; Show on the screen hides the touch screen (its mgu-render
  *     client closed) before the browser's goes up; the browser hidden: the
  *     touch screen back; "ui" with browser: the page at once; the car
- *     moving hides both and refuses; the List corner sends {"ev":"list"};
+ *     moving hides the browser, the touch screen back in its place (Show
+ *     refused, "ui" not); the List corner sends {"ev":"list"};
  *     "ui" off hides it.
  *   node test/touch_test.js [out dir]   (Linux, root: the tool's folders are
  *   under /var/opt; run_touch_test.sh runs it in Node 8)
@@ -224,16 +225,21 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     assert.strictEqual(st.shown, true);
     console.log('ok   the browser hidden: the touch screen back; "ui" with browser shows the page at once; a new resolution does not flash the touch screen');
 
-    /* the car moving: both hidden, refused */
+    /* the car moving: the browser hidden, the touch screen back in its place */
     send({ cmd: 'speed', kmh: 30 });
-    await until(() => st.shown === false && st.touch === false && st.touchWanted === false, 3000, 'both hidden while moving');
-    await wait(300);
-    assert.strictEqual(st.touch, false, 'the touch screen does not come back while moving');
+    await until(() => st.shown === false && st.touch === true && st.touchWanted === true, 3000, 'the browser hidden, the touch screen back while moving');
     errors = [];
+    send({ cmd: 'show' });
+    await until(() => errors.length, 3000, 'Show refused while moving');
+    assert.ok(/driving/.test(errors[0]), errors[0]);
+    assert.strictEqual(st.touch, true, 'the touch screen stays');
+    errors = [];
+    send({ cmd: 'ui', on: false });
+    await until(() => st.touch === false, 3000, 'hidden by the app');
     send({ cmd: 'ui', on: true });
-    await until(() => errors.length, 3000, 'refused while moving');
-    assert.ok(/parked/.test(errors[0]), errors[0]);
-    console.log('ok   the car moving hides both, the touch screen refused while it moves');
+    await until(() => st.touch === true, 3000, 'the touch screen shown while moving');
+    assert.ok(!errors.length, 'not refused: ' + errors.join('; '));
+    console.log('ok   the car moving hides the browser, the touch screen back in its place and shown while moving; Show refused');
 
     /* parked again: the List corner, and the app hiding it */
     send({ cmd: 'speed', kmh: 0 });

@@ -15,7 +15,7 @@
  * there, the touch screen opens by itself (the empty screen state, then the
  * tool's touch screen once it is visible); its List corner ({"ev":"list"})
  * brings the page back; the Touch screen row opens it again; the car moving
- * closes it to the page, the row off while moving; without mgu-render no
+ * keeps it up, the row on while moving; without mgu-render no
  * touch screen (the row says so, the app stays on its list); the speed goes
  * to the tool, also with the page hidden; the CarPlay second screen
  * switch is off without hook111 and sends hook111 alt / off; connected and idle, the
@@ -363,16 +363,28 @@ async function main() {
     await until('touch off on BACK', () => count('touch', (c) => c.on === false) === 1, 1500);
     console.log('ok   the Touch screen row opens the screen state, then the touch screen; BACK hides it');
 
-    /* the car moving: the page back (the tool hides its picture itself); the row off */
+    /* the car moving: the touch screen stays (map settings on the move) */
     await press('castTouch');
     await until('the screen state for the move', () => opened.length === 3);
     await until('shown for the move', () => st.touch);
-    st = Object.assign({}, st, { moving: true, speed: 30, touch: false, touchWanted: false });
+    const closedBefore = closed.length, offBefore = count('touch', (c) => c.on === false);
+    st = Object.assign({}, st, { moving: true, speed: 30 });
     control.broadcast();
-    await until('the page back when the car moves', () => closed.length === 2);
-    await until('moving: Touch screen off', () => byName.castTouch.enabled === false && byName.castTouch.text === 'Touch screen (only while parked)');
+    await sleep(1000);
+    assert.strictEqual(closed.length, closedBefore, 'the screen state stays when the car moves');
+    assert.strictEqual(count('touch', (c) => c.on === false), offBefore, 'the touch screen not hidden when the car moves');
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('BACK while moving: the touch screen hidden', () => count('touch', (c) => c.on === false) === offBefore + 1, 1500);
+    await until('moving: Touch screen on', () => byName.castTouch.enabled === true && byName.castTouch.text === 'Touch screen');
     assert.strictEqual(byName.castStop.enabled, true, 'the list keeps working while driving');
-    console.log('ok   the car moving closes the touch screen to the page; moving: the row off, the rest on');
+    await press('castTouch');
+    await until('opened again while moving', () => opened.length === 4);
+    await until('touch on while moving', () => count('touch', (c) => c.on === true) === 4);
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('BACK: the page', () => count('touch', (c) => c.on === false) === offBefore + 2, 1500);
+    console.log('ok   the car moving keeps the touch screen up; moving: the row on, it opens again');
 
     /* the speed: to the tool once the car gives one, with the page hidden too */
     assert(!received.some((c) => c.cmd === 'speed'), 'no speed sent while the car gives none (65535)');
@@ -399,7 +411,7 @@ async function main() {
     OnlineApp.last.emit('entryPointExecute', APP_JSON.application.entryPoints[0].uuid);
     await sleep(600);
     assert.strictEqual(opened.length, o, 'entered: the list stays');
-    assert.strictEqual(count('touch', (c) => c.on === true), 3, 'the touch screen not asked for');
+    assert.strictEqual(count('touch', (c) => c.on === true), 4, 'the touch screen not asked for');
     console.log('ok   without mgu-render: "' + byName.castTouch.text + '", the app stays on its list');
 
     control.close();

@@ -16,8 +16,8 @@
  * use marked); entered, the touch screen opens by itself (the empty screen
  * state, then the picker once it is visible); its List corner brings the
  * page back; a row sends use; Touch screen opens it again; BACK and a
- * pop-up hide it; the car moving brings the page back; moving: Touch screen
- * off and "only while parked" from the tool; Sport or Comfort cycles; the strip; on / off; a failed command's
+ * pop-up hide it; the car moving keeps it up; moving: Touch screen still
+ * on; the tool's refusal shown; Sport or Comfort cycles; the strip; on / off; a failed command's
  * error; the speed; the tool going away.
  */
 const assert = require('assert');
@@ -359,17 +359,22 @@ async function main() {
     await until('the page back again', () => byName.clusterPick.enabled === true);
     console.log('ok   BACK and a pop-up hide the picker; Touch screen shows it again');
 
-    /* the car moving: the page back (the tool hides its picture itself) */
+    /* the car moving: the picker stays */
     await press('clusterPick');
     await until('the screen state for the move', () => opened.length === 4);
     await until('shown for the move', () => st.picker);
+    const closedBefore = closed.length, offBefore = count('picker', (c) => c.on === false);
     st = Object.assign({}, st, { moving: true, speed: 30 });
     tool.broadcast();
-    await until('the page back when the car moves', () => closed.length === 2);
-    await until('picker off when moving', () => count('picker', (c) => c.on === false) === 3, 2000);
-    st = Object.assign({}, st, { moving: null, speed: null });
+    await sleep(1000);
+    assert.strictEqual(closed.length, closedBefore, 'the screen state stays when the car moves');
+    assert.strictEqual(count('picker', (c) => c.on === false), offBefore, 'the picker not hidden when the car moves');
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('picker off on BACK', () => count('picker', (c) => c.on === false) === offBefore + 1, 2000);
+    st = Object.assign({}, st, { moving: null, speed: null, picker: false });
     tool.broadcast();
-    console.log('ok   the car moving closes the touch screen to the page');
+    console.log('ok   the car moving keeps the touch screen up');
 
     /* the speed; moving: Choose off; the tool refusing the picker */
     await sleep(1200);
@@ -378,18 +383,19 @@ async function main() {
     await until('speed 30 sent', () => received.some((c) => c.cmd === 'speed' && c.kmh === 30), 3000);
     st = Object.assign({}, st, { moving: true, speed: 30 });
     tool.broadcast();
-    await until('moving', () => byName.clusterPick.enabled === false && byName.clusterPick.text === 'Touch screen (only while parked)');
+    await sleep(300);
+    assert(byName.clusterPick.enabled === true && byName.clusterPick.text === 'Touch screen', 'moving: Touch screen on');
     assert(byName.clusterTheme1.enabled, 'the theme rows still work while driving');
     st = Object.assign({}, st, { moving: false, speed: 0 });
     speedRaw = 0;
     tool.broadcast();
     await until('parked', () => byName.clusterPick.enabled);
-    refuse = 'only while parked';
+    refuse = 'no themes on the unit';
     await press('clusterPick');
-    await until('the refusal', () => S.text === 'Error: only while parked');
+    await until('the refusal', () => S.text === 'Error: no themes on the unit');
     byName[SCREEN].emit('visible', { visible: false });
     byName[STATE].emit('visible', { visible: true });
-    console.log('ok   the speed goes to the tool; moving: Touch screen off, the rows still on; the tool\'s refusal shown');
+    console.log('ok   the speed goes to the tool; moving: Touch screen and the rows still on; the tool\'s refusal shown');
 
     /* the readings: read, converted to the tool's names and units, sent as they change, all once a second */
     const lastSignals = () => {

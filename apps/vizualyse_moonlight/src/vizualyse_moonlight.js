@@ -8,7 +8,8 @@
  * The touch screen first: entered, the app opens its empty screen state and
  * the tool's touch screen goes over it (the QR code, the stream and its
  * buttons, Picture on, on / off: the same as the list); its List corner,
- * BACK or the car moving bring this page back (platform app/touch_mode). A
+ * BACK bring this page back (platform app/touch_mode); parked or driving
+ * (a stream stops when the car moves, the touch screen stays). A
  * stream on the centre console covers the touch screen while it plays (the
  * tool hides it and shows it again after).
  *
@@ -312,8 +313,8 @@ class MoonlightApp extends OnlineApp {
         const covered = this._touch ? this._touch.covered() : false;
         const on = up && c.enabled() && !covered;
         this._write(N.status, c.statusText());
-        this._write(N.touch, c.moving() ? 'Touch screen (only while parked)' : 'Touch screen');
-        this._setEnabled(N.touch, up && !c.moving() && !covered);
+        this._write(N.touch, 'Touch screen');
+        this._setEnabled(N.touch, up && !covered);
         this._write(N.link, link ? link : '');
         this._write(N.hint, link ? 'Scan with the phone whose hotspot the car is on to pair and pick the PC and game' : '');
         this._write(N.info, c.infoText());

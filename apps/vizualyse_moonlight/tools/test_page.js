@@ -14,8 +14,8 @@
  * with no tool the status says so and the buttons are off; entered, the
  * touch screen opens by itself (the empty screen state, then
  * {"cmd":"touch","on":true}); {"ev":"list"} closes it to the page; the
- * Touch screen row opens it again; BACK hides it; the car moving closes it
- * and turns the row off;
+ * Touch screen row opens it again; BACK hides it; the car moving keeps it
+ * up and the row on;
  * connected and idle, the link is written and shown as a QR PNG (a new file
  * per link, the old handle released); Resume last follows canResume and
  * sends resume; Stop and Quit game follow the stream and send stop and quit;
@@ -288,18 +288,23 @@ async function main() {
     await until('touch off on BACK', () => count('touch', (c) => c.on === false) === offs + 1 && !st.touch, 1500);
     console.log('ok   the Touch screen row opens it again; BACK hides it');
 
-    /* the car moving: the page back (the tool hides its picture itself) */
+    /* the car moving: the touch screen stays */
     await press('moonlightTouch');
     await until('the screen state for the move', () => opened.length === 3);
     await until('shown for the move', () => st.touch);
-    st = Object.assign({}, st, { moving: true, speed: 30, touch: false, touchWanted: false });
+    const closedBefore = closed.length, offBefore = count('touch', (c) => c.on === false);
+    st = Object.assign({}, st, { moving: true, speed: 30 });
     tool.broadcast();
-    await until('the page back when the car moves', () => closed.length === 2);
-    await until('Touch screen off while moving', () => byName.moonlightTouch.enabled === false && byName.moonlightTouch.text === 'Touch screen (only while parked)');
-    st = Object.assign({}, st, { moving: false, speed: 0 });
+    await sleep(1000);
+    assert.strictEqual(closed.length, closedBefore, 'the screen state stays when the car moves');
+    assert.strictEqual(count('touch', (c) => c.on === false), offBefore, 'the touch screen not hidden when the car moves');
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('touch off on BACK', () => count('touch', (c) => c.on === false) === offBefore + 1, 1500);
+    await until('Touch screen on while moving', () => byName.moonlightTouch.enabled === true && byName.moonlightTouch.text === 'Touch screen');
+    st = Object.assign({}, st, { moving: false, speed: 0, touch: false, touchWanted: false });
     tool.broadcast();
-    await until('Touch screen on when parked', () => byName.moonlightTouch.enabled === true);
-    console.log('ok   the car moving closes the touch screen to the page; Touch screen is off while moving');
+    console.log('ok   the car moving keeps the touch screen up; Touch screen stays on while moving');
 
     st = Object.assign({}, st, { moving: null, speed: null });
     tool.broadcast();

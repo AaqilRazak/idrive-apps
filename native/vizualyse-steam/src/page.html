@@ -254,6 +254,7 @@ function render(s) {
    * new state at once, not after a reload */
   const label = (act, x) => ({
     nosteam: 'Run without Steam: ' + (x.noSteam ? 'on' : 'off'),
+    nodrm: 'Remove Steam DRM: ' + (x.noDrm ? 'on' : 'off'),
     vulkan: 'Vulkan: ' + (x.vulkan ? 'on' : 'off') + (x.vulkan === x.vulkanDefault ? ' (the default)' : ''),
     iris: 'OpenGL driver: ' + (x.iris ? 'iris' + (x.irisDefault ? ' (the default)' : '') + (x.vulkan ? ', used only with Vulkan off' : '') : 'i965'),
     detail: 'Detail: ' + (x.detail || 'normal'),
@@ -274,8 +275,15 @@ function render(s) {
       '<div class="game" data-app="' + x.appId + '"><div class="row"><b style="flex:1">' + esc(x.name) + '</b>' +
       '<button class="acc" data-act="play"' + (s.running || !x.present ? ' disabled' : '') + '>Play</button></div>' +
       (x.usb && !x.present ? '<div class="err">On the USB stick ' + esc(x.usb) + ': plug it in</div>' : '') +
-      (x.steamStub ? '<div class="err">Steam\'s DRM wrapper (SteamStub) is on this game\'s program: it needs the Steam client to start, ' +
-        'which the car doesn\'t have (Run without Steam can\'t help). It will most likely quit at once.</div>' : '') +
+      (!x.steamStub ? '' : x.drm && x.drm.supported ?
+        '<div class="row"><button data-act="nodrm">' + esc(label('nodrm', x)) + '</button></div>' +
+        (x.noDrm ? '<p class="dim">Steam\'s DRM wrapper (SteamStub ' + esc(x.drm.variant) + ') is taken off its program on the car; ' +
+          'Steam\'s own is kept beside it. Off puts it back. An update that brings it back is unwrapped again.</p>' :
+          '<p class="err">Steam\'s DRM wrapper (SteamStub ' + esc(x.drm.variant) + ') is on this game\'s program: without the Steam client it quits at once. ' +
+          'Remove Steam DRM takes it off on the car (Steam\'s program kept beside it).</p>') +
+        (x.noSteam || x.steamApi === 0 ? '' : '<p class="dim">Such games usually also need Run without Steam (Options).</p>') :
+        '<div class="err">Steam\'s DRM wrapper (SteamStub) is on this game\'s program, of a kind the car can\'t take off yet' +
+        (x.drm && x.drm.why ? ' (' + esc(x.drm.why) + ')' : '') + ': it will most likely quit at once.</div>') +
       '<div class="dim">' + x.appId + (x.sizeMb ? ' - ' + (x.sizeMb / 1024).toFixed(1) + ' GB' : '') + (x.usb ? ' - USB ' + esc(x.usb) : '') + (x.engine ? ' - ' + esc(x.engine) : '') +
       ' - ' + (x.exe ? esc(x.exe) : '<span class="err">no program found</span>') + '</div>' +
       '<details><summary>Options</summary>' +
@@ -284,7 +292,7 @@ function render(s) {
       (x.steamApi === 0 ? '' :
         '<div class="row"><button data-act="nosteam">' + esc(label('nosteam', x)) + '</button></div>' +
         '<p class="dim">For a game that says to start it from Steam: its Steam library is swapped for gbe_fork (Goldberg\'s emulator); ' +
-        'achievements and cloud saves stay on the car. Off puts Steam\'s back. Steam\'s DRM wrapper still stops some games.</p>') +
+        'achievements and cloud saves stay on the car. Off puts Steam\'s back. A game with Steam\'s DRM wrapper also needs Remove Steam DRM.</p>') +
       (s.vulkanAvailable || x.vulkan ?
         '<div class="row"><button data-act="vulkan">' + esc(label('vulkan', x)) + '</button></div>' +
         '<p class="dim">Direct3D 9-11 through DXVK, or a Godot 4 game\'s own Vulkan renderer, instead of OpenGL: on by default, 32- and 64-bit. ' +
@@ -387,6 +395,10 @@ $('library').addEventListener('click', (e) => {
   if (act === 'nosteam') {
     const g = last && last.library.filter((x) => x.appId === appId)[0];
     api('/api/game', { appId: appId, noSteam: !(g && g.noSteam) }).catch(() => null);
+  }
+  if (act === 'nodrm') {
+    const g = last && last.library.filter((x) => x.appId === appId)[0];
+    api('/api/game', { appId: appId, noDrm: !(g && g.noDrm) }).catch(() => null);
   }
   if (act === 'vulkan') {
     const g = last && last.library.filter((x) => x.appId === appId)[0];

@@ -49,10 +49,11 @@ Should work when all of these hold:
   i965: 3.0 compat, 4.5 core);
 - playable with a **wired XInput pad** or **left click / drag only** (no
   keyboard, right click or hover on touch);
-- single-player, offline, no Steam DRM wrapper (SteamStub), no anti-cheat.
+- single-player, offline, no anti-cheat; a Steam DRM wrapper (SteamStub)
+  only of variant 3 (Remove Steam DRM, untried on a real game yet).
 
 Hard limits (Unsupported): D3D12 only (no VKD3D on ANV 19); Vulkan 1.2+
-only (ANV 19.1.8 is Vulkan 1.1); .NET Framework / XNA (no Wine Mono, yet); SteamStub, anti-cheat,
+only (ANV 19.1.8 is Vulkan 1.1); .NET Framework / XNA (no Wine Mono, yet); SteamStub 1 / 2, anti-cheat,
 online-only; Games for Windows Live; needs more than the RAM cap.
 
 Learned on the car (2026-11-08): **older engines need a screen of at least
@@ -195,14 +196,15 @@ load:
 | Game | Why |
 |---|---|
 | Terraria | XNA, .NET Framework (no Wine Mono): "Wine Mono is not installed", exit 255 on the car (2026-11-08). Wine Mono 11.3.0 with FNA is in GE-Proton (planned back in) **2026-11-09, 0.2.0 (Wine Mono):** launches; about 12 pictures/s in game on Vulkan (DXVK), 6 on iris and 6 on i965 (WineD3D); iris and i965 start faster than Vulkan on its first run; its picture slightly cut at the top at 960x540 (0.2.1 fits it). |
-| Castle Crashers | SteamStub DRM (`.bind` section in castle.exe): exits 53 at once, with or without gbe_fork (2026-11-08) 0.2.0 says so at install and on the phone page (2026-11-09). |
+| Castle Crashers | SteamStub 3.1 x86 on castle.exe (`.bind`): exits 53 at once without help (2026-11-08). **Remove Steam DRM** (`steamstub.js`) + Run without Steam: on the bench (2026-11-16, Steam 0.2.4's tool, the exe unwrapped with 0.3.1's `unwrapExe`) it starts, runs at 30 fps and draws its title screen on DXVK (lavapipe). Not yet on the car. |
+| Call of Duty: World at War | SteamStub 1 / 2 on CoDWaW.exe and CoDWaWmp.exe (2026-11-16, bench): not taken off; the phone page says so. |
 | Defy Gravity | XNA, .NET Framework (no Wine Mono) |
 | Celeste | FNA on .NET Framework (Windows build) |
 | Rogue Legacy | XNA, .NET Framework |
 | Hades | D3D11 / Vulkan only, GPU-heavy; no OpenGL path |
 | Cuphead | Heavy D3D11 and sprite memory; minimum GPU above the unit's |
 | Any D3D12 / Vulkan-only game | No Vulkan on the 4.14 kernel ([browser.md](browser.md)) |
-| Games with anti-cheat, online-only, SteamStub | No Steam client; gbe_fork doesn't cover DRM wrappers |
+| Games with anti-cheat, online-only, SteamStub 1 / 2 | No Steam client; gbe_fork doesn't cover DRM wrappers; Remove Steam DRM takes off variant 3 only |
 | Games for Windows Live titles | GFWL doesn't run here |
 | 3D games with a GTX 4xx / HD 5xxx or newer minimum | Far past the HD 505 before Wine's overhead |
 | Apex Legends, PUBG, SMITE / SMITE 2, Counter-Strike 2, Team Fortress 2, Counter-Strike: Source, Day of Defeat / Source, Team Fortress Classic, Deathmatch Classic, Ricochet, HL2: Deathmatch, HL Deathmatch: Source, Rainbow Six Siege, For Honor, Rust, Dead by Daylight, Warframe, Warface: Clutch, Brawlhalla, Divine Knockout, Realm Royale, Ring of Elysium, Quake Champions, Chivalry, Mirage, PAYDAY 2, Vermintide 2, Evolve Stage 2, WildStar, ELYON, Echo of Soul, Rocket League, Super Auto Pets, Hand of the Gods, Moirai, Guns of Icarus, Blockstorm, Offensive Combat: Redux, Team Racing League | Online-only or anti-cheat |

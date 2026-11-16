@@ -29,10 +29,10 @@ which keeps every control.
 - **Only where mgu-render is installed**: the tool doesn't require it (this
   screen's output is optional); `touchAvailable` in the status says whether
   its client is on the unit, and without it the app stays on its list.
-- **Only while parked**: the app sends the car's speed once a second
-  (`{"cmd":"speed","kmh":N}`); above 3 km/h the touch screen hides and
-  `touch` is refused (`only while parked`). Cast is used while driving: the
-  list does it all then.
+- **Parked or driving** (since 0.4.1): the app sends the car's speed once a
+  second (`{"cmd":"speed","kmh":N}`), shown on the Info tab; the touch
+  screen stays while driving (the map's settings on the move, as the car's
+  own controls). The list does it all too.
 - **A stream on this screen** (the media console output) uses mgu-render
   under the same client name: the touch screen hides first, and comes back
   when that stream ends if the app still wants it (`touchWanted`).

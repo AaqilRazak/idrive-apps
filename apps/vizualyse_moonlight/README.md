@@ -14,8 +14,8 @@ the stream (its state, frame rate and decoding, the game, the PC and the
 controllers) with **Stop**, **Quit game** and **Resume last**, **Picture on**
 (Centre console, Cluster, HUD) and Moonlight on / off; on its **Info** tab
 the host, the game, the pictures, the controllers, the uplink and the
-renderer. Its **List** button (top right), BACK or the car starting to move
-bring the page back: the iDrive list, all of it usable with the controller.
+renderer; parked or driving (moving stops a stream, not the touch screen).
+Its **List** button (top right) or BACK bring the page back: the iDrive list, all of it usable with the controller.
 The list's first row, **Touch screen**, opens the touch screen again. The
 handling is the platform's `app/touch_mode`.
 
@@ -77,8 +77,8 @@ application.xml and uiDescription.json from one list.
 ```sh
 node tools/build.js          # the source package; the unit builds the app
 node tools/test_page.js      # the page and the touch screen's states against a fake SDK, HMI and Vehicle2, and a fake tool socket
-node tools/make_page.js vizualyse_moonlight@0.3.0
-node tools/make_icon.js vizualyse_moonlight@0.3.0/rhmiData/variantGroups/Common/images/vizualyse_moonlight_icon.png
+node tools/make_page.js vizualyse_moonlight@0.3.1
+node tools/make_icon.js vizualyse_moonlight@0.3.1/rhmiData/variantGroups/Common/images/vizualyse_moonlight_icon.png
 ```
 
 The structure (SDK use, tile, visibility, the QR handles) follows

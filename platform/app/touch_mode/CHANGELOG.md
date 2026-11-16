@@ -3,6 +3,14 @@
 A version is frozen once a newer one exists. A component moves to a new
 one with `node platform/platform.js use app/touch_mode <version>`.
 
+## 1.1.0
+
+The touch screen stays while the car moves: the car starting to move no
+longer closes the screen state, and the touch screen opens (entered, the
+list's row, back after a pop-up) whatever the speed. `tool.moving()` is no
+longer called. A tool still hides its video (a game, a stream, a web page)
+while driving: that is the tool's own gate.
+
 ## 1.0.0
 
 New: `touch_mode.js`, an iDrive app's touch screen and its list (the touch

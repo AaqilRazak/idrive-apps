@@ -20,7 +20,7 @@
  * opens, show goes, then ui (the touch screen for when the game goes); BACK
  * and a pop-up hide both (the game keeps running; the touch screen unwanted
  * first), Show opens the screen state again, Stop sends stop; Touch screen
- * opens it again; the car moving closes it to the page; a
+ * opens it again; the car moving keeps it up, the row on; a
  * game ending before it draws shows its note and nothing; the download row;
  * Picture; out of memory; the speed and "only while parked"; the restart
  * note; a failed command's error; installing; on / off; a new link's QR; the
@@ -352,21 +352,26 @@ async function main() {
     await until('ended', () => G.text === 'Slay the Spire 2 ended: stopped on the iDrive page' && byName.steamPlay1.text === 'Play: Slay the Spire 2' && byName.steamPlay1.enabled);
     console.log('ok   BACK and a pop-up hide it (it keeps running); Show opens the screen state again; Stop sends stop');
 
-    /* Touch screen: the screen state and the touch screen again; the car moving: the page */
+    /* Touch screen: the screen state and the touch screen again; the car moving: it stays */
     await sleep(450);
     byName.steamTouch.emit('action');
     await until('the screen state for the touch screen', () => opened.length === 4 && opened[3] === byName[SCREEN]);
     await until('the touch screen up', () => st.ui === true && count('ui', (c) => c.on === true) === 4);
-    st = Object.assign({}, st, { moving: true, speed: 30, ui: false, uiWanted: false });
+    const closedBefore = closed.length, offBefore = count('ui', (c) => c.on === false);
+    st = Object.assign({}, st, { moving: true, speed: 30 });
     tool.broadcast();
-    await until('the page back when the car moves', () => closed.length === 2 && closed[1] === byName[SCREEN]);
-    await until('Touch screen off while moving', () => byName.steamTouch.enabled === false && byName.steamTouch.text === 'Touch screen (only while parked)');
-    st = Object.assign({}, st, { moving: false, speed: 0 });
+    await sleep(1000);
+    assert.strictEqual(closed.length, closedBefore, 'the screen state stays when the car moves');
+    assert.strictEqual(count('ui', (c) => c.on === false), offBefore, 'the touch screen not hidden when the car moves');
+    byName[SCREEN].emit('visible', { visible: false });
+    byName[STATE].emit('visible', { visible: true });
+    await until('ui off on BACK', () => count('ui', (c) => c.on === false) === offBefore + 1, 1500);
+    await until('Touch screen on while moving', () => byName.steamTouch.enabled === true && byName.steamTouch.text === 'Touch screen');
+    st = Object.assign({}, st, { moving: false, speed: 0, ui: false, uiWanted: false });
     tool.broadcast();
-    await until('Touch screen on again', () => byName.steamTouch.enabled === true && byName.steamTouch.text === 'Touch screen');
     await sleep(600);
-    assert.strictEqual(opened.length, 4, 'not back by itself after the move');
-    console.log('ok   Touch screen opens it again; the car moving closes it to the page (the row off while moving)');
+    assert.strictEqual(opened.length, 4, 'not opened again by itself');
+    console.log('ok   Touch screen opens it again; the car moving keeps it up (the row on while moving)');
 
     /* Play, but the game ends before it draws: no screen state */
     const before = opened.length;

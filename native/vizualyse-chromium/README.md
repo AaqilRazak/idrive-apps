@@ -52,7 +52,8 @@ false` when the state goes (BACK, HOME, a pop-up).
   `{"cmd":"ui","on":true,"browser":true}` (the iDrive list's Show) puts the
   browser up at once.
 - **List** hides it and sends the app `{"ev":"list"}`. The car moving (above
-  3 km/h) hides both pictures, and `ui` is refused until it stops.
+  3 km/h) hides the browser's picture (Show refused until it stops); the
+  touch screen stays, back in its place (since 0.3.1).
 - Frames from memory: the link and the uplink's state are read every 2 s,
   never by a frame. One opaque RGBX pixmap the size of the app area; only
   what changed is sent (a button's press: its 96x96). Touch is read
@@ -291,7 +292,7 @@ is in `/var/opt/vizualyse-chromium/profile` (uid 12997). The journal has an
   in the app area, Back / Reload / Home, the resolution's dropdown, game
   mode and the browser off / on from Settings, Show on the screen swaps it
   for the browser (its client closed first), the browser hidden brings it
-  back, a new resolution does not flash it, moving hides both, List and
+  back, a new resolution does not flash it, moving hides the browser and brings it back, List and
   `ui` off.
 - What the bench can't tell: anything about the unit's GPU and kernel (the
   container has neither: 0.1.1's hang was only seen on the car), so whether

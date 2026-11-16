@@ -7,8 +7,8 @@ The tile is **Cluster themes**.
 ## The touch screen, and the list
 
 Opening the app opens its **touch screen** (the tool's picker, below) by
-itself while parked. Its **List** button (top right), BACK or the car
-starting to move bring the page back: the iDrive list, all of it usable
+itself, parked or driving. Its **List** button (top right) or BACK bring
+the page back: the iDrive list, all of it usable
 with the controller. The list's first row, **Touch screen**, opens the touch
 screen again. The handling is the platform's `app/touch_mode`.
 
@@ -42,9 +42,9 @@ nothing to press) and sends `picker` once it is visible. Should the HMI not
 open the screen state within 3 s, the picker goes over the main page (its
 buttons disabled) and the log says why. BACK, HOME, another app, and a
 pop-up, a call or a warning taking the focus for 300 ms hide it (`picker`
-with `on: false`). The tool's `{"ev":"list"}` (its List button) and the
-car starting to move close the screen state (`closeState`, or the page
-opened if that fails). The app also hides the picker as it shuts down.
+with `on: false`). The tool's `{"ev":"list"}` (its List button) closes
+the screen state (`closeState`, or the page opened if that fails). Moving
+doesn't (since 0.3.1); Try stays parked only. The app also hides the picker as it shuts down.
 
 The iDrive controller works this page, not the picker (the knob reaches only
 RHMI states: knowledge/input.md); everything the picker does but Try and the

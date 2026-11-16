@@ -33,7 +33,7 @@ One `LT_State_Wide` page, all of it usable with the controller:
 | Row | What it does |
 |---|---|
 | status | `Ready - Show puts it on the screen; ...`, `On the screen - the back arrow on the left returns here`, `The touch screen is up - List (top right) or the back arrow returns here`, `Installing the browser (about a minute, once)...`, `Starting the browser...`, `Only while parked - the car is moving (30 km/h)`, `Out of memory - the page needed more than 1536 MB (phone page: Memory)` (for 2 minutes after the tool reports a kill at the cap), `Off - ...`, `Error: ...` (a failed command's for 10 s, or the tool's), `The Browser tool is not running - ...` |
-| Touch screen | the screen state, then `ui`: the touch screen; off while moving (`Touch screen (only while parked)`) |
+| Touch screen | the screen state, then `ui`: the touch screen, parked or driving |
 | QR code | the phone page's link, an `LT_Label_1Graphic_Scalable` showing a PNG from `/dev/shm/vizualyse_chromium_qr_<uid>/` |
 | link | the same link as text, and how to use it |
 | Show on the screen | opens the empty screen state, then `ui` with `browser`: the browser covers the app area (not the HMI's title bar or left strip); off while moving or not running |
@@ -67,8 +67,8 @@ also does as it shuts down.
 
 As vizualyse_moonlight: the app reads `Vehicle2.statusCarSpeed2` every
 second (`src/vehicle_speed.js`) and sends `{"cmd":"speed","kmh":N}`; the
-tool hides the touch screen and the browser above 3 km/h and won't show
-them, and the app closes the screen state to this page.
+tool hides the browser's picture above 3 km/h and won't show it; the
+touch screen stays, and comes back in the picture's place (since 0.3.1).
 
 ## The socket
 
@@ -87,8 +87,8 @@ app holds it while it runs.
 ```sh
 node tools/build.js          # the source package; the unit builds the app
 node tools/test_page.js      # the page against a fake SDK, HMI and Vehicle2, and a fake tool socket
-node tools/make_page.js vizualyse_chromium@0.3.0
-node tools/make_icon.js vizualyse_chromium@0.3.0/rhmiData/variantGroups/Common/images/vizualyse_chromium_icon.png
+node tools/make_page.js vizualyse_chromium@0.3.1
+node tools/make_icon.js vizualyse_chromium@0.3.1/rhmiData/variantGroups/Common/images/vizualyse_chromium_icon.png
 ```
 
 The structure follows [vizualyse_moonlight](../vizualyse_moonlight).

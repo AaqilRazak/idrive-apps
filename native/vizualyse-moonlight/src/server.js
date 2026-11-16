@@ -32,8 +32,9 @@
  * - The touch screen (touch.js, the platform's touch kit): the phone page's
  *   QR code, the stream with Stop / Quit game / Resume last, where the
  *   picture goes and on / off, in the app area while the iDrive app's screen
- *   state is open ({"cmd":"touch","on":true}), parked only. A stream on the
- *   centre console hides it until the stream ends; its List corner sends
+ *   state is open ({"cmd":"touch","on":true}), parked or driving (driving
+ *   stops the stream, not the touch screen). A stream on the centre console
+ *   hides it until the stream ends; its List corner sends
  *   {"ev":"list"} to the app. Its model comes from memory (touchState()).
  *
  *   node server.js     (root: /dev/input, /dev/dri, the renderer, ALSA, nftables)
@@ -282,7 +283,6 @@ function setSpeed(kmh) {
     vehicle.at = Date.now();
     if (moving() !== was) log('parked: ' + (moving() ? 'moving, ' + vehicle.kmh + ' km/h' : 'standing, ' + vehicle.kmh + ' km/h'));
     if (moving() && session) stopSession('the car is moving (' + vehicle.kmh + ' km/h): only while parked');
-    if (moving() && touch && (touch.isWanted() || touch.shown())) { touch.drop('the car is moving'); if (control) control.broadcast(); }
 }
 /* UK units, for the app's and the touch screen's texts */
 function mph(kmh) { return Math.round(kmh * 0.621371) + ' mph'; }
@@ -688,7 +688,6 @@ touch.on('list', () => { if (control) { control.send({ ev: 'list' }); control.br
 
 /* the app's screen state opened or closed */
 function setTouch(on) {
-    if (on && moving()) return 'only while parked: the car is moving (' + mph(vehicle.kmh) + ')';
     const err = touch.want(!!on);
     if (on && !err && touch.covered()) log('touch: wanted; shown when the stream on the centre console ends');
     return err;

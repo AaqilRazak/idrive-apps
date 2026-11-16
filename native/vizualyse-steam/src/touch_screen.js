@@ -59,7 +59,7 @@ function nearest(resolutions, id, shape) {
 class SteamTouch extends EventEmitter {
     /* opts: dir (the kit), clientPath (mgu-render's client), log, touch
      * { python, iface, src, file, cmd }, state() (the tool's side of the
-     * model, touch_view.js), moving(), gameShown(), actions { show(), stop(),
+     * model, touch_view.js), gameShown(), actions { show(), stop(),
      * play(appId), resolution(id), upscale(id), enable(on) } (each returns
      * an error string or null) */
     constructor(opts) {
@@ -109,7 +109,6 @@ class SteamTouch extends EventEmitter {
             this.ui.hide('the app hid it');
             return null;
         }
-        if (this.o.moving()) return 'only while parked';
         this.wanted = true;
         if (this.o.gameShown()) return null;
         return this.ui.show();
@@ -120,16 +119,9 @@ class SteamTouch extends EventEmitter {
 
     /* the game's picture went: the touch screen again, if the screen state is still open */
     gameGone() {
-        if (!this.wanted || this.ui.shown() || this.o.moving() || this.o.gameShown()) return;
+        if (!this.wanted || this.ui.shown() || this.o.gameShown()) return;
         const e = this.ui.show();
         if (e) this.log('ui: ' + e);
-    }
-
-    /* the car moves: hidden (the app goes back to its list) */
-    moved() {
-        this.wanted = false;
-        this.autoShow = null;
-        if (this.ui.shown()) this.ui.hide('the car is moving');
     }
 
     /* the game's state changed: one played here shows once it draws */

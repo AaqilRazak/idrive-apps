@@ -90,6 +90,13 @@ workflow (Actions > Release, the component ids).
   - A game with Steam's API needs Run without Steam here as on the car
     (no Steam client): Terraria says "Please launch the game from your
     Steam client" without it. Turn it on by itself for such a game?
+- [ ] **Steam 0.3.1: Remove Steam DRM on the car** (our own SteamStub 3.x
+  unwrapper, `src/steamstub.js`; not released). On the bench (2026-11-16):
+  Castle Crashers' castle.exe is SteamStub 3.1 x86, unwrapped it starts with
+  Run without Steam and draws its title screen (DXVK on lavapipe). Still:
+  the phone page's switch end to end on a 0.3.1 bench; then on the car
+  (asked first) Castle Crashers with both switches. CoD: World at War is
+  SteamStub 1 / 2: not supported.
 - [ ] **Steam 0.2.1 on the car.** 0.2.0 on the car (2026-11-09): Vampire
   Survivors and Slay the Spire 2 run on ANV 22.3.7; Teslagrad launches (Vulkan,
   Run without Steam); Terraria on Wine Mono, 12 pictures/s on Vulkan against 6
@@ -830,7 +837,10 @@ the picker: [README](native/vizualyse-cluster/README.md#the-picker-on-the-centra
 Every app opens on a touch screen drawn by its tool in the app area, with a
 **List** button (top right) back to its iDrive list: the touch kit, platform
 `tool/touch_ui` (the tool's screen: look, widgets, redrawing only what
-changed) and `app/touch_mode` (the app's screen state, List, BACK, moving).
+changed) and `app/touch_mode` (the app's screen state, List, BACK). Since
+`app/touch_mode` 1.1.0 the touch screens stay while driving (decided
+2026-11-16); only a tool's video (Steam's game, Browser's page, Moonlight's
+stream) and Cluster's Try stay parked only.
 Design (Green on graphite, chosen 2026-11-15):
 https://claude.ai/artifact/S5fYduKq97f4mnRczxUpGW. Branch `app-restyle`.
 
@@ -860,8 +870,16 @@ https://claude.ai/artifact/S5fYduKq97f4mnRczxUpGW. Branch `app-restyle`.
   today); the touch screen left up if an app dies (the tool never hears).
   `platform/platform.js` does not run on Node 8 (`withFileTypes`): the
   apps' `test_page.js` need it stubbed in the Node 8 container.
-- [ ] **Undecided** (the recommendation in brackets): the touch screens hide
-  while the car moves and the list shows (yes, all five); the knob switching
+- [ ] **Touch screens while driving on the car** (Cast 0.4.1, Browser
+  0.3.1, Cluster themes 0.4.1, Moonlight 0.3.1, Steam 0.3.1; apps 0.4.1,
+  0.3.1, 0.3.1, 0.3.1, 0.2.1; tested off the car 2026-11-16, not released):
+  each touch screen stays up as the car pulls away and opens from the list
+  while moving; Cast's CarPlay map settings by touch on the move; Steam's
+  game and Browser's page hide above 3 km/h with the touch screen back in
+  their place; a Moonlight stream stops with the touch screen still there.
+  Not gated yet: Cast's stream on this screen (a URL on the centre console)
+  plays while driving, as before.
+- [ ] **Undecided** (the recommendation in brackets): the knob switching
   to the list by itself (not done: a focusable row on the screen state
   would be pressed by touches on the picture; the knob read through FrontCCU,
   as in "The picker, next" under Cluster themes, would do it); Steam's game art (plain

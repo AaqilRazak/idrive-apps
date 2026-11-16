@@ -19,8 +19,8 @@
  *     the app area as one opaque pixmap; the Info tab; Moonlight off and on
  *     from its toggle; Resume last does nothing with nothing to resume;
  *     Picture on's sheet (the HUD refused: no cluster-render here); the List
- *     corner sends {"ev":"list"}; hidden when the car moves and refused while
- *     it moves; hidden by the app.
+ *     corner sends {"ev":"list"}; kept while the car moves and shown when
+ *     asked while it moves; hidden by the app.
  *   node test/touch_test.js [out-dir]   (the PNGs, to look at)
  */
 'use strict';
@@ -181,8 +181,8 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     assert.ok(!t.shown(), 'wanted during a stream: not shown');
     t.cover(null);
     await until(() => t.shown(), GAP_MS + 500, 'shown when it ends');
-    t.drop('the car is moving');
-    assert.ok(!t.shown() && !t.isWanted(), 'the car moving: hidden and forgotten');
+    t.drop('the tool stops');
+    assert.ok(!t.shown() && !t.isWanted(), 'dropped: hidden and forgotten');
     assert.strictEqual(clients(UNIT_LOG).most, 1, 'never two clients at once');
     console.log('ok   a stream on the centre console hides it; back ' + GAP_MS + ' ms after it ends if still wanted, not if the app closed it');
 
@@ -262,22 +262,25 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     await until(() => lists === 1 && statusNow.touch === false && statusNow.touchWanted === false, 3000, 'List');
     console.log('ok   the List corner: {"ev":"list"} to the app, the touch screen hidden');
 
-    /* the car moves: hidden; refused while moving */
+    /* the car moves: the touch screen stays; shown when asked while moving */
     send({ cmd: 'touch', on: true });
     await until(() => statusNow.touch === true, 3000, 'shown again');
     send({ cmd: 'speed', kmh: 40 });
-    await until(() => statusNow.touch === false && statusNow.touchWanted === false, 3000, 'hidden while moving');
+    await until(() => statusNow.moving === true, 3000, 'moving in the status');
+    await wait(1200);
+    assert.ok(statusNow.touch === true && statusNow.touchWanted === true, 'still shown while moving');
     errors = [];
+    send({ cmd: 'touch', on: false });
+    await until(() => statusNow.touch === false, 3000, 'hidden by the app while moving');
     send({ cmd: 'touch', on: true });
-    await until(() => errors.length, 3000, 'refused while moving');
-    assert.ok(/parked.*25 mph/.test(errors[0]), errors[0]);
+    await until(() => statusNow.touch === true, 3000, 'shown while moving');
+    assert.ok(!errors.length, 'not refused while moving: ' + errors.join('; '));
     send({ cmd: 'speed', kmh: 0 });
-    send({ cmd: 'touch', on: true });
-    await until(() => statusNow.touch === true, 3000, 'shown when parked');
+    await until(() => statusNow.moving === false, 3000, 'parked');
     send({ cmd: 'touch', on: false });
     await until(() => statusNow.touch === false && statusNow.touchWanted === false, 3000, 'hidden by the app');
     assert.strictEqual(clients(LOG).most, 1, 'one mgu-render client at a time');
-    console.log('ok   hidden when the car moves and refused while it moves ("' + errors[0] + '"); hidden by the app');
+    console.log('ok   kept while the car moves, shown when asked while it moves; hidden by the app');
     console.log('     pictures: ' + pngs.join(', '));
     if (process.env.TOUCH_TEST_LOG) console.log(out);
     finish(0);

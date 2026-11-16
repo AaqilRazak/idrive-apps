@@ -22,7 +22,8 @@
  *   (screen.js); the display's touches inside it (chromium-touch) become
  *   the page's touches.
  * - Only while parked: the iDrive app sends the speed; above 3 km/h the page
- *   is hidden and can't be shown.
+ *   is hidden and can't be shown. The touch screen stays (its controls
+ *   work while driving; the page's picture doesn't).
  * - The touch screen (touch_screen.js, the platform's touch kit): the
  *   controls in the app area while the iDrive app's screen state is open
  *   ({"cmd":"ui","on":true}). It and the browser's picture share that state,
@@ -266,7 +267,7 @@ touchUi.on('list', () => {
  * resolution does, never brings it up between) */
 function touchBack() {
     setImmediate(() => {
-        if (!touchWanted || stopping || screen.shown() || touchUi.shown() || moving()) return;
+        if (!touchWanted || stopping || screen.shown() || touchUi.shown()) return;
         const e = touchUi.show();
         log('ui: back after the browser' + (e ? ': ' + e : ''));
         if (control) control.broadcast();
@@ -529,8 +530,8 @@ function setSpeed(kmh) {
     vehicle.kmh = isFinite(v) ? v : null;
     vehicle.at = Date.now();
     if (!moving()) return;
-    /* the app shows its list: neither picture comes back by itself */
-    if (touchWanted || touchUi.shown()) { touchWanted = false; touchUi.hide('the car is moving'); }
+    /* the browser's picture goes; the touch screen stays (back in its
+     * place, touchBack()): its controls work while driving */
     if (wantShown || screen.shown()) hide('driving (' + v.toFixed(0) + ' km/h)');
 }
 
@@ -543,7 +544,6 @@ function setUi(on, andBrowser) {
         if (wantShown || screen.shown()) hide('the app\'s screen state went');
         return null;
     }
-    if (moving()) return 'only while parked';
     touchWanted = true;
     let err = null;
     if (andBrowser) err = settings.enabled ? show() : 'the browser is off';

@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "vizualyse_cluster",
-  "version": "0.3.0",
-  "tree": "vizualyse_cluster@0.3.0",
+  "version": "0.3.1",
+  "tree": "vizualyse_cluster@0.3.1",
   "modules": [
     "src/vizualyse_cluster.js",
     "src/cluster_control.js",

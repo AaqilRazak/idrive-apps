@@ -8,8 +8,9 @@
  *
  * The touch screen first: entered, the app opens its empty screen state and
  * the tool's touch screen (the library, the running game, Settings, the
- * phone page's QR code) goes over it; its List corner, BACK or the car
- * moving bring this page back (platform app/touch_mode).
+ * phone page's QR code) goes over it, parked or driving (the game's
+ * picture is parked only); its List corner or BACK bring this page back
+ * (platform app/touch_mode).
  *
  * One LT_State_Wide page, all of it usable with the iDrive controller: the
  * status; Touch screen (it again); what plays; Show on the screen; Stop the
@@ -375,8 +376,8 @@ class SteamApp extends OnlineApp {
         /* while a picture covers the page (no screen state), nothing under it can be pressed */
         const covered = this._touch ? this._touch.covered() : c.shown();
         this._write(N.status, c.statusText());
-        this._write(N.touch, c.moving() ? 'Touch screen (only while parked)' : 'Touch screen');
-        this._setEnabled(N.touch, up && !covered && !c.moving());
+        this._write(N.touch, 'Touch screen');
+        this._setEnabled(N.touch, up && !covered);
         this._write(N.game, on ? c.gameText() : '');
         this._write(N.download, on ? c.downloadText() : '');
         this._write(N.link, link ? link : '');

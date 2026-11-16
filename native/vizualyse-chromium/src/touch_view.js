@@ -71,7 +71,7 @@ function status(m) {
     if (m.browser === 'starting' || m.browser === 'crashed') return { tone: 'warn', text: 'Starting the browser' + (m.gpuMode ? ' on the GPU' : '') + '...' };
     if (m.browser !== 'running') return { tone: '', text: 'The browser is not running' };
     if (m.oomMb) return { tone: 'warn', text: 'Out of memory: the page needed more than ' + m.oomMb + ' MB (phone page: Memory)' };
-    if (m.moving) return { tone: 'warn', text: 'Only while parked: the car is moving' };
+    if (m.moving) return { tone: 'warn', text: 'The page shows only while parked: the car is moving' };
     return { tone: 'ok', text: 'Ready. Show puts the page on the screen' };
 }
 

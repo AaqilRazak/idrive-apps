@@ -15,7 +15,7 @@
       }
     },
     "app/touch_mode": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": {
         "src/touch_mode.js": "touch_mode.js"
       }

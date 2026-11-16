@@ -14,7 +14,8 @@
  *     ended, the touch screen back while the state is open, not after; Show,
  *     Stop, Play (and its picture by itself once it draws), the pages, the
  *     picture's shape and size, upscaling, Steam on / off from taps; the List
- *     corner; the car moving;
+ *     corner; the car moving (the game's picture goes, the touch screen
+ *     stays and comes back in its place);
  *   - the tool end to end, where it can run (Linux, root: Node 8 in a
  *     container, below): server.js with no bundles, driven over the control
  *     socket as the iDrive app drives it, a stand-in mgu-render client, touches
@@ -22,7 +23,7 @@
  *     shows the touch screen in the app area as one opaque pixmap; a tap on the
  *     Settings tab, the picture size from its sheet, upscaling, Steam off and
  *     on; the List corner sends {"ev":"list"} and hides it; the car moving
- *     hides it and the tool refuses it until parked; off.
+ *     keeps it, and it shows when asked while moving; off.
  *
  *   node test/touch_test.js [out dir]
  *   MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/w" ml-unit:18.04-node8 sh -c \
@@ -276,17 +277,31 @@ const one = (what) => assert.ok(!(ui.shown() && T.gameShown) && upNow() <= 1, wh
     assert.ok(!ui.shown(), 'and it stays down');
     assert.strictEqual(ui.want(true), null);
     await wait();
+    assert.ok(ui.shown(), 'wanted again: shown');
+    /* the car moving: the touch screen stays; the game's picture can't go
+     * up; one already up goes (the server's hide), the touch screen back */
+    const wasRunning = T.model.running;
+    T.model.running = true;
     T.moving = true;
-    ui.moved();
-    assert.ok(!ui.shown(), 'moving: hidden');
-    assert.strictEqual(ui.want(true), 'only while parked', 'refused while moving');
+    assert.strictEqual(showGame(), 'not while driving', 'no game picture while moving');
+    assert.ok(ui.shown(), 'moving: the touch screen stays');
     T.moving = false;
+    assert.strictEqual(showGame(), null);
+    assert.ok(!ui.shown(), 'the game up: the touch screen down');
+    T.moving = true;
     hideGame();
     await wait();
-    assert.ok(!ui.shown(), 'not back by itself after a move');
+    assert.ok(ui.shown(), 'driving hid the game: the touch screen back in its place');
+    ui.want(false);
+    assert.ok(!ui.shown(), 'hidden by the app');
+    assert.strictEqual(ui.want(true), null, 'not refused while moving');
+    await wait();
+    assert.ok(ui.shown(), 'shown while moving');
+    T.moving = false;
+    T.model.running = wasRunning;
     ui.stop('done');
     one('the end');
-    console.log('ok   the List corner hides it and tells the app; the car moving hides it, refused while moving');
+    console.log('ok   the List corner hides it and tells the app; the car moving keeps it (the game\'s picture goes, the touch screen back in its place)');
     await endToEnd();
     console.log('all passed');
     process.exit(0);
@@ -368,18 +383,21 @@ async function endToEnd() {
         send({ cmd: 'ui', on: true });
         await until(() => st.ui === true, 3000, 'shown again');
         send({ cmd: 'speed', kmh: 40 });
-        await until(() => st.ui === false && st.uiWanted === false, 3000, 'hidden while moving');
+        await until(() => st.moving === true, 3000, 'moving in the status');
+        await wait(1200);
+        assert.ok(st.ui === true && st.uiWanted === true, 'still shown while moving');
         errors = [];
+        send({ cmd: 'ui', on: false });
+        await until(() => st.ui === false, 3000, 'hidden by the app while moving');
         send({ cmd: 'ui', on: true });
-        await until(() => errors.length, 3000, 'refused while moving');
-        assert.ok(/parked/.test(errors[0]), errors[0]);
+        await until(() => st.ui === true, 3000, 'shown while moving');
+        assert.ok(!errors.length, 'not refused while moving: ' + errors.join('; '));
         send({ cmd: 'speed', kmh: 0 });
-        send({ cmd: 'ui', on: true });
-        await until(() => st.ui === true, 3000, 'parked: shown');
+        await until(() => st.moving === false, 3000, 'parked');
         send({ cmd: 'ui', on: false });
         await until(() => st.ui === false && st.uiWanted === false, 3000, 'off');
         assert.ok(!logged().some((l) => /^vizualyse_steam /.test(l)), 'no game client');
-        console.log('ok   the tool: the List corner sends {"ev":"list"} and hides it; moving hides it, refused until parked; off');
+        console.log('ok   the tool: the List corner sends {"ev":"list"} and hides it; kept while moving, shown when asked while moving; off');
     } finally {
         if (sock) sock.destroy();
         tool.kill('SIGTERM');

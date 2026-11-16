@@ -7,12 +7,12 @@
  *
  * The touch screen first: entered, the app opens its empty screen state and
  * the tool's touch screen goes over it (the same controls by touch: Cast,
- * CarPlay and Info tabs); its List corner, BACK or the car moving bring
- * this page back (platform app/touch_mode). Only where the tool can draw it
- * (mgu-render installed: the tool's touchAvailable) and only while parked:
- * the app reads the car's speed once a second (vehicle_speed.js) and hands
- * it to the tool, which hides the touch screen above 3 km/h. Cast is used
- * while driving: this page keeps every control.
+ * CarPlay and Info tabs); its List corner or BACK bring this page back
+ * (platform app/touch_mode). Only where the tool can draw it (mgu-render
+ * installed: the tool's touchAvailable); parked or driving (map settings on
+ * the move). The app reads the car's speed once a second (vehicle_speed.js)
+ * and hands it to the tool (the touch screen's status line). This page
+ * keeps every control too.
  *
  * One LT_State_Wide page: the status; Touch screen (the touch screen
  * again); the phone page's link as a QR code
@@ -304,8 +304,8 @@ class CastApp extends OnlineApp {
         const covered = this._touch ? this._touch.covered() : c.touchShown();
         const en = (name, v) => this._setEnabled(name, v && !covered);
         this._write(N.status, c.statusText());
-        this._write(N.touch, !up || c.touchAvailable() ? (c.moving() ? 'Touch screen (only while parked)' : 'Touch screen') : 'Touch screen (needs mgu-render)');
-        this._setEnabled(N.touch, up && c.touchAvailable() && !c.moving() && !covered);
+        this._write(N.touch, !up || c.touchAvailable() ? 'Touch screen' : 'Touch screen (needs mgu-render)');
+        this._setEnabled(N.touch, up && c.touchAvailable() && !covered);
         this._write(N.link, link ? link : '');
         this._write(N.hint, link ? 'Scan with the phone whose hotspot the car is on, or open the link' : '');
         this._write(N.info, c.infoText());

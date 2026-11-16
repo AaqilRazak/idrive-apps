@@ -7,8 +7,9 @@
  * serves.
  *
  * The touch screen first: entered, the app opens its empty screen state and
- * the tool's touch screen goes over it; its List corner, BACK or the car
- * moving bring this page back (platform app/touch_mode).
+ * the tool's touch screen goes over it, parked or driving (only the page's
+ * picture is parked only); its List corner or BACK bring this page back
+ * (platform app/touch_mode).
  *
  * One LT_State_Wide page, all of it usable with the iDrive controller: the
  * status; Touch screen (it again); the phone page's link as a QR code
@@ -318,7 +319,7 @@ class BrowserApp extends OnlineApp {
         if (!this._state || this._shutdownPromise) return;
         const c = this._control, up = c.connected(), on = up && c.enabled(), run = on && c.running(), link = on ? c.link() : '';
         this._write(N.status, c.statusText());
-        this._write(N.touch, c.moving() ? 'Touch screen (only while parked)' : 'Touch screen');
+        this._write(N.touch, 'Touch screen');
         this._write(N.link, link ? link : '');
         this._write(N.hint, link ? 'Scan with the phone whose hotspot the car is on to type addresses and text' : '');
         this._write(N.page, c.pageText());
@@ -330,7 +331,7 @@ class BrowserApp extends OnlineApp {
         /* while a picture covers the page itself (no screen state under it: the
          * fallback, or the phone's Show), nothing under it can be pressed */
         const covered = this._touch ? this._touch.covered() || (c.pictureUp() && !this._touch.screenOpen()) : c.pictureUp();
-        this._setEnabled(N.touch, up && !covered && !c.moving());
+        this._setEnabled(N.touch, up && !covered);
         this._setEnabled(N.enable, up && !covered);
         this._setEnabled(N.show, run && !covered && !c.moving());
         this._setEnabled(N.home, run && !covered);

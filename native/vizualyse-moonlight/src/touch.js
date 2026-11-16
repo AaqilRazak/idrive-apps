@@ -14,8 +14,9 @@
  *   back when it ends (uncover()) if the app still wants it. Both are
  *   mgu-render clients of this name: never two at once, the touch screen
  *   comes back GAP_MS after the stream's picture went.
- * - The car moving hides it and forgets it was wanted (the app shows its
- *   list); so does the List corner ('list': the server tells the app).
+ * - It stays while the car moves (only a stream stops then: the server's
+ *   parked gate); the List corner hides it ('list': the server tells the
+ *   app).
  * - It only shows: stop, quit, resume, the output and on / off are the
  *   tool's (act).
  */
@@ -92,7 +93,7 @@ class Touch extends EventEmitter {
         return this._apply(on ? null : 'the app hid it');
     }
 
-    /* the car moves: hidden, and not wanted any more (the app shows its list) */
+    /* hidden, and not wanted any more (the app shows its list) */
     drop(why) {
         this.wanted = false;
         this._apply(why);

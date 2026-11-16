@@ -14,7 +14,7 @@
  *     redraws a part; Try refused until the car is known to stand still,
  *     then a theme on the cluster for a moment and back; Use turns themes on
  *     with the family shown; a swipe goes to the next family; Sport /
- *     Comfort; hidden when the car moves, refused while it moves; off.
+ *     Comfort; kept while the car moves, shown when asked while moving; off.
  *   node test/picker_test.js [out.png]   (the last picture, to look at)
  */
 'use strict';
@@ -229,16 +229,20 @@ function send(c) { ctl.write(JSON.stringify(c) + '\n'); }
     await wait(500);
     fs.writeFileSync(OUT, writePng(1790, 638, fs.readFileSync(LOG + '.1.rgba')));
 
-    /* the car moves: hidden; refused while moving */
+    /* the car moves: the picker stays; shown when asked while moving */
     const n1 = logged().length;
     send({ cmd: 'speed', kmh: 40 });
-    await until(() => statusNow.picker === false, 3000, 'hidden while moving');
-    assert.ok(logged().slice(n1).some((o) => o.op === 'close'), 'its mgu-render client closed');
+    await until(() => statusNow.moving === true, 3000, 'moving in the status');
+    await wait(1200);
+    assert.ok(statusNow.picker === true, 'still shown while moving');
+    assert.ok(!logged().slice(n1).some((o) => o.op === 'close'), 'its mgu-render client kept');
     errors = [];
+    send({ cmd: 'picker', on: false });
+    await until(() => statusNow.picker === false, 3000, 'hidden by the app');
     send({ cmd: 'picker', on: true });
-    await until(() => errors.length, 3000, 'refused while moving');
-    assert.ok(/parked/.test(errors[0]), errors[0]);
-    console.log('ok   hidden when the car moves, refused while it moves');
+    await until(() => statusNow.picker === true, 3000, 'shown while moving');
+    assert.ok(!errors.length, 'not refused while moving: ' + errors.join('; '));
+    console.log('ok   the picker stays while the car moves, and shows when asked while moving');
 
     /* standing again: shown, Off, hidden by the app */
     send({ cmd: 'speed', kmh: 0 });
