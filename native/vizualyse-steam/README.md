@@ -424,13 +424,15 @@ refused until parked, and the touch screen comes back in its place.
 | DepotDownloader | uid 12996 | `dotnet DepotDownloader.dll`, HOME `/var/opt/vizualyse-steam/home` |
 | `screen.js` | root | the mgu-render client in layer mode, in the app area |
 | `touch_screen.js`, `touch_view.js` | root | the touch screen (the platform's touch kit: `ui_*.js`, `touch_reader.py`, `ui.*` fonts) and its two tabs; one picture at a time with the game |
+| `art.js`, `jpeg.js`, `ico.js` | root (the fetch: uid 12996) | the games' pictures on the cards: Steam's store picture (`capsule_616x353.jpg`, else the store's header), fetched once through the phone into `state/art/<appid>.jpg`, read by our own baseline JPEG reader; else the icon in the game's program; made at the size drawn, in the background |
 | `control.js` | root | `/dev/shm/vizualyse-steam/ctl.sock` for the app only: status; enable, disable, play, stop, show, hide, ui, resolution, upscale, speed; the `list` event |
 | `firewall.js` | root | the phone page's TCP 8494 on `wlan0`, in memory |
 | `swap.js` | root | the games' swap file on the hard disk: made once, on while a game runs |
 | `deactivate.js` | root | the deactivate hook: the firewall rule and the swap file removed |
 
 State in `/var/opt/vizualyse-steam/state` (root): the token, the settings,
-the library (`library.json`), `game-running` while a game runs.
+the library (`library.json`), `game-running` while a game runs, the games'
+store pictures (`art/<appid>.jpg`).
 
 ## Off the car
 

@@ -29,10 +29,16 @@
  * download (null, or { text, percent: 0..100 while downloading }),
  * resolution, upscale, resolutions [{ id, short, shape }], link, qr (the
  * link's modules, or null), client ({ on, installed, account, step, note }:
- * the Steam client setting, client.js).
+ * the Steam client setting, client.js), art (appId, 'tile' | 'thumb')
+ * (optional).
  *
- * Game tiles are plain colour plates (no cover art: the tool would have to
- * download and convert pictures while Steam installs games).
+ * A game's picture (art.js: Steam's store picture, else its program's icon
+ * on its plate), made by the tool at the exact size drawn, asked for only
+ * for what is on the screen: m.art(appId, 'tile') { img, key } at TILE (a
+ * library tile, its bottom darkened for the name), m.art(appId, 'thumb') at
+ * THUMB (the running game's card). None (not made yet, nothing to show): the
+ * plate colour alone, as before. The picture goes under the tile's button,
+ * drawn without its plate, so the ring and the press still show over it.
  */
 'use strict';
 
@@ -49,6 +55,9 @@ const PER_PAGE = 4;
 const GAP = 16;
 const TILE_W = Math.floor((W - 2 * (PAGE.w + GAP) - (PER_PAGE - 1) * GAP) / PER_PAGE);
 const QR = { x: 1314, w: 428 };
+/* the pictures' sizes (art.js makes them at these): a library tile, the running game's thumb */
+const TILE = { w: TILE_W, h: ROW.h };
+const THUMB = { x: 10, y: 9, w: 230, h: 132 };
 /* the plates' colours, dark enough for white names; a game's is fixed by its app id */
 const PLATES = [0x45215f, 0x5a2219, 0x174866, 0x5a420f, 0x1f5038, 0x175050, 0x501b3e, 0x2c3850];
 const UPSCALES = [{ v: 'off', l: 'Off', s: 'bilinear' }, { v: 'fsr', l: 'FSR', s: 'sharpened' }, { v: 'fsr-soft', l: 'FSR', s: 'no sharpening' }];
@@ -70,13 +79,16 @@ function card(m, chipW) {
     const chip = live ? { text: 'Running · ' + (g.fps || 0) + ' pictures/s' + (g.gpuBuffers === false ? ' · no GPU buffers' : ''), tone: 'live' }
         : starting ? { text: 'Starting', tone: 'warn' }
             : g ? { text: 'Ended', tone: '' } : { text: 'Nothing running', tone: '' };
-    b.push({ id: 'chip', kind: 'chip', x: 24, y: 18, w: chipW(chip.text), h: 36, text: chip.text, tone: chip.tone });
-    const btnX = CARD.w - 24 - STOP.w - GAP - SHOW.w, textW = btnX - 24 - 24;
-    b.push({ id: 'title', kind: 'text', x: 24, y: 56, w: textW, h: 58, font: 'f44', text: g ? g.name : 'No game running' });
+    /* the game's picture at the left, the words after it */
+    const art = g && m.art ? m.art(g.appId, 'thumb') : null, tx = art ? THUMB.x + THUMB.w + 24 : 24;
+    if (art) b.push({ id: 'gameArt', kind: 'image', x: THUMB.x, y: THUMB.y, w: THUMB.w, h: THUMB.h, r: 12, img: art.img, imgKey: art.key });
+    b.push({ id: 'chip', kind: 'chip', x: tx, y: 18, w: chipW(chip.text), h: 36, text: chip.text, tone: chip.tone });
+    const btnX = CARD.w - 24 - STOP.w - GAP - SHOW.w, textW = btnX - tx - 24;
+    b.push({ id: 'title', kind: 'text', x: tx, y: 56, w: textW, h: 58, font: 'f44', text: g ? g.name : 'No game running' });
     const sub = live ? (g.shown ? 'On the screen' : 'Hidden: it keeps running until you stop it')
         : starting ? 'Wine, then the game: this can take a minute'
             : g ? (g.note ? 'Ended: ' + g.note : 'Ended') : 'Play one from the library below';
-    b.push({ id: 'sub', kind: 'text', x: 24, y: 112, w: textW, h: 30, font: 'f20', colour: 'dim', text: sub });
+    b.push({ id: 'sub', kind: 'text', x: tx, y: 112, w: textW, h: 30, font: 'f20', colour: 'dim', text: sub });
     const y = Math.round((CARD.h - SHOW.h) / 2);
     b.push({ id: 'show', kind: 'button', x: btnX, y: y, w: SHOW.w, h: SHOW.h, act: true, on: live && !m.moving && !g.shown,
         style: 'primary', icon: 'play', label: 'Show on the screen' });
@@ -110,8 +122,10 @@ function library(m, chipW) {
         const x = PAGE.w + GAP + i * (TILE_W + GAP);
         const playing = !!(m.game && m.game.state !== 'ended' && m.game.appId === g.appId);
         const can = g.playable && !m.running && !m.moving && m.enabled;
+        const art = m.art ? m.art(g.appId, 'tile') : null;
+        if (art) b.push({ id: 'art:' + g.appId, kind: 'image', x: x, y: ROW.y, w: TILE_W, h: ROW.h, r: 14, img: art.img, imgKey: art.key });
         b.push({ id: 'play:' + g.appId, kind: 'button', x: x, y: ROW.y, w: TILE_W, h: ROW.h, act: true, on: can, style: 'quiet', r: 14,
-            under: g.playable || playing ? plate(g.appId) : 'panel', label: '' });
+            under: art ? undefined : g.playable || playing ? plate(g.appId) : 'panel', label: '' });
         b.push({ id: 'name:' + g.appId, kind: 'text', x: x + 24, y: ROW.y + ROW.h - 112, w: TILE_W - 48, h: 44, font: 'f32',
             colour: g.playable || playing ? 'text' : 'dim', text: g.name });
         const sub = playing ? 'Running now' : g.why ? g.why : m.running ? 'Play (once the game stops)' : 'Play';
@@ -171,4 +185,4 @@ function view(m, ui, chipW) {
     };
 }
 
-module.exports = { TABS, PER_PAGE, TILE_W, ROW, view, pages, plate, shapeOf };
+module.exports = { TABS, PER_PAGE, TILE_W, ROW, TILE, THUMB, view, pages, pageOf, plate, shapeOf };

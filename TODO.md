@@ -107,7 +107,8 @@ workflow (Actions > Release, the component ids).
   so the UI toggle itself is untried); a real variant-1 / 2.0 binary (none to
   hand yet); then on the car (asked first), with real GPU and pad.
 - [ ] **Steam: the Steam client setting on the car** (merged with
-  0.3.2 on steam-integration; not released, no version bump: `src/client.js`, README "Steam client").
+  0.3.2 on steam-integration; not released, no version bump: `src/client.js`,
+  README "Steam client").
   Off the car, on the play bench (2026-11-16): a fresh prefix (only BMW's
   roots) to the sign-in's QR code on the screen (installer from Valve, 148
   roots written, ~250 MB self-update, the restart survived); with a
@@ -121,6 +122,16 @@ workflow (Actions > Release, the component ids).
   start takes on the Atom. Later: the UI in a cgroup of its own (v1:
   move_charge_at_immigrate) to push only it to swap; Steam's overlay
   (gameoverlayui, ~75 MB) off; first-start redistributables marked done.
+- [ ] **Steam: the games' pictures on the touch screen's cards** (merged on
+  steam-integration, not released, no version bump yet): Steam's store picture
+  (capsule_616x353, fetched once through the phone), else the program's
+  icon on its plate, else the plate; `src/art.js`, our own baseline JPEG
+  reader (`jpeg.js`) and icon reader (`ico.js`); tests in CI. Off the car
+  (2026-11-16): real capsules and the icons of CoD, Castle Crashers,
+  Terraria, Slay the Spire 2 drawn; 50-80 ms a tile on Node 8 with one CPU,
+  in the background. Still: the play bench end to end (fetched on install,
+  icons offline); then the car (asked first): how long a page's pictures
+  take on the Atom.
 - [ ] **Steam 0.2.1 on the car.** 0.2.0 on the car (2026-11-09): Vampire
   Survivors and Slay the Spire 2 run on ANV 22.3.7; Teslagrad launches (Vulkan,
   Run without Steam); Terraria on Wine Mono, 12 pictures/s on Vulkan against 6
