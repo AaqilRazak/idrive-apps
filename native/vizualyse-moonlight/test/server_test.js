@@ -132,7 +132,16 @@ async function main() {
         let err = '';
         proc.stderr.on('data', (d) => { err += String(d); });
         const ready = await new Promise((r) => { proc.stdout.once('data', (d) => r(String(d).trim())); proc.on('exit', (c) => r('exit ' + c)); setTimeout(() => r('not ready in 20 s'), 20000); });
-        if (!kind.node.test(ready)) { console.log('skip ' + kind.what + ': ' + ready + ' ' + err.trim()); proc.kill(); continue; }
+        if (!kind.node.test(ready)) {
+            console.log('skip ' + kind.what + ': ' + ready + ' ' + err.trim());
+            /* gone (its device detached) before the tool starts: a half-there USB
+             * device hung moonlight-core's usbfs scans, no stats, no pads (CI, 2026-11-16) */
+            if (proc.exitCode === null) {
+                const gone = await new Promise((r) => { proc.once('exit', () => r(true)); proc.kill(); setTimeout(() => r(false), 5000); });
+                if (!gone) { proc.kill('SIGKILL'); console.log('     (' + kind.what + ': its stand-in did not end in 5 s)'); }
+            }
+            continue;
+        }
         console.log('     virtual gamepad: ' + kind.name + ', ' + ready);
         pads.push(Object.assign({ proc: proc, err: () => err }, kind));
     }

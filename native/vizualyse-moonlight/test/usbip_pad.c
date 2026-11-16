@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,10 @@
 #define PRODUCT "Test USB Pad"
 
 static int sock = -1;
+/* SIGTERM / SIGINT (the test giving up on us): out of the loop, the device
+ * detached, never left half there for the next test's usbfs scans */
+static volatile sig_atomic_t quit;
+static void on_signal(int sig) { (void)sig; quit = 1; }
 
 static void put32(unsigned char *b, uint32_t v) { b[0] = v >> 24; b[1] = v >> 16; b[2] = v >> 8; b[3] = v; }
 static uint32_t get32(const unsigned char *b) { return (uint32_t)b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3]; }
@@ -231,6 +236,11 @@ static long ms(void) {
 
 int main(int argc, char **argv) {
     int seconds = argc > 1 ? atoi(argv[1]) : 30;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_signal;   /* no SA_RESTART: poll returns EINTR at once */
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
     if (access(VHCI "/attach", W_OK) != 0) { printf("no vhci_hcd (modprobe vhci-hcd)\n"); return 77; }
     int port = free_port();
     if (port < 0) { printf("no free vhci port\n"); return 77; }
@@ -248,6 +258,7 @@ int main(int argc, char **argv) {
     pid_t unbinder = 0;
     long free_since = 0;
     for (;;) {
+        if (quit) break;
         long now = ms();
         /* twice, a moment apart: a driver can bind just after the interface appears */
         if (unbinder > 0 && waitpid(unbinder, NULL, WNOHANG) == unbinder) unbinder = 0;
@@ -260,7 +271,9 @@ int main(int argc, char **argv) {
                  * that unlink is ours to answer, so this loop must keep serving. */
                 fprintf(stderr, "usbip_pad: unbinding %s from its kernel driver\n", ifname);
                 unbinder = fork();
-                if (unbinder == 0) _exit(syswrite(unbind, ifname) < 0 ? 1 : 0);
+                /* the child lets go of the connection first: stuck in the unbind, its
+                 * copy kept vhci's device alive after we were gone (CI, 2026-11-16) */
+                if (unbinder == 0) { close(sock); _exit(syswrite(unbind, ifname) < 0 ? 1 : 0); }
             }
             /* driverless for 300 ms: a driver can bind just after the interface appears */
             if (r != 0) free_since = 0;

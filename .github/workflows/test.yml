@@ -185,6 +185,11 @@ jobs:
         run: |
           sudo modprobe uinput || true
           sudo modprobe vhci-hcd || true
+          # as on the car, no kernel driver for an XInput pad: the runner's xpad took
+          # the test's USB pad, its unbind never finished, and the half-gone device
+          # hung moonlight-core's usbfs pad scan (no stats, no pads: 2026-11-16)
+          sudo modprobe -r xpad || true
+          echo 'blacklist xpad' | sudo tee /etc/modprobe.d/vzs-no-xpad.conf >/dev/null
           sh native/vizualyse-moonlight/test/run_sunshine_test.sh
 
       # the image always: the reproducible-build check builds the Browser in it
