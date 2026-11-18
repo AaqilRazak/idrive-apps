@@ -148,6 +148,60 @@ cluster's centred picture, fitted into the band. Written at once while the
 picture is on the HUD (the phone takes it when it reconnects). The commands
 are `{"cmd":"carplayHudAlt","on":…}` and `POST /api/carplay-hud-alt`.
 
+**The car's badge** ("Show the car's badge" on the touch screen's Cast tab
+and the phone page's Cluster card; off by default, since 0.4.2). The model
+badge (M340i, eDrive, ...) is not in the map's slot but in a small one over
+it, 0x105 (0x103 on some cars), where BMW's HMI also maps its CarPlay turn
+box (content 0x1000310) for a route. cluster-render's guide hold covers that
+slot with an empty scene, so the map shows there, while the box is mapped in
+it, shown or parked; where the HMI keeps the box mapped (parked) without a
+route, the badge is covered all the time. With the option on, Cast decides:
+
+- **No route:** Cast's layers send `guide_hold: 0`; the badge shows.
+- **A route** (the turn box *visible* in the slot, map status 1 or 2): the
+  hold is let work; the CarPlay map, with its directions card, has the slot.
+  Neither the badge nor BMW's box shows. BMW's box can show for a moment at
+  the route's start (up to ~2 s polling, then cluster-render's take-over).
+- **The route over:** no turn box mapped in either slot for 5 s: the badge
+  again. While held the box is parked behind the map whatever the route
+  does, so a car whose HMI keeps the box mapped after a route keeps the map
+  there until CarPlay disconnects (the readout below says so).
+- **No report** of either slot from cluster-render: held, as before.
+
+Off: as before 0.4.2 (cluster-render decides). Cast asks cluster-render for
+its status every 2 s while it's on (every 10 s otherwise) and shows the
+badge slot's rows, the guide hold and its decision on the phone page and
+the Info tab (`/api/status` `badge`); each change is logged ("badge: ...").
+`{"cmd":"showBadge","on":…}`, `POST /api/show-badge`. The route signal is
+the slot table because it is the one Cast can read safely here: hook111
+sees the phone's iAP2 route guidance (`iAPSendMessage`), but reading it
+needs three more of Cinemo's functions, whose addresses need the unit's
+library; the car's own `CarPlayManager.projectedGuidanceActive` (the iDrive
+app) is not confirmed in this firmware's catalog, and a field it lacks makes
+BMW's installer refuse the whole app.
+
+**Experimental performance mode** (the touch screen's Cast tab and the phone
+page's Cluster card; off by default, since 0.4.2): the CarPlay picture
+(not a stream URL), as close to the car's own as the link allows, and kept
+up by itself. Every part was checked for the car's safety first, then that
+nothing is lost, then what it gains:
+
+| Change | Safety | Nothing lost | Gain |
+|---|---|---|---|
+| No ffmpeg `fps` filter; every decoded frame once (`-fps_mode passthrough`), the layer at 30 on the map (15 on the HUD as before) | cluster-render writes only the newest frame at the layer's rate and its governor keeps the cluster link within its cap whatever comes in | the same picture; `test/carplay_test.js` checks every frame | raw H.264 has no timestamps: ffmpeg numbered frames at 25 a second and `fps` dropped a third of a 30 fps stream unevenly (and duplicated a slower one), a frame late. Now the newest real frame, evenly |
+| ffmpeg makes the renderer's atlas (extractplanes, hstack, vstack) | ffmpeg filters only | byte for byte the tool's own `atlas()` (tested, map and HUD) | no row copies or per-frame allocation in the tool (Node 8 on the head unit) |
+| cluster-render's `always_packed` (where its hello offers it) | upstream's own option (waze-on-cluster); a service without it ignores it | a little softer picture while it moves | about a third of the bytes per change: more frames fit the cap |
+| The CarPlay output you picked starts again by itself once hook111 is ready (car start, tool restart) | only the CarPlay picture, only what you picked last; not while another tool asks for the cluster | a Stop, a stream URL or the second screen off forgets it | no tap after a start |
+| At most 3 s between listener runs while the phone streams (not up to 30) | only while hook111 says the phone streams | the same doubling otherwise | the picture back in seconds |
+| ffmpeg started again when the phone's frames reach hook111 and none reach the tool for 5 s | at most once in 20 s | — | a stuck decoder recovers by itself |
+| The cluster map made again (as a Cluster tap does) after 20 s parked behind the stock map, or waiting while it holds the slot | at most once a minute and 3 times before the map shows again; never for a slot lock (a warning, a door), a refusal, or the HUD (which gives way to calls) | — | no tap when the car's own map took the slot back |
+
+Turning it on or off restarts a playing CarPlay picture with it. The phone
+page and the Info tab say what it last did (`/api/status` `perf`).
+`{"cmd":"perfMode","on":…}`, `POST /api/perf-mode`. Not yet on a car: the
+head unit's CPU at 30 frames a second is the thing to watch (`top`: ffmpeg,
+node, cluster-render).
+
 0.3.5's shape setting (a taller picture squeezed back) and its vignette are
 gone: on the car the squeeze looked squashed and moved nothing.
 

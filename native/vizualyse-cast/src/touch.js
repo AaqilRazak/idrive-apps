@@ -140,6 +140,8 @@ class CastTouch extends EventEmitter {
         case 'eta': return c({ cmd: 'carplayCards', eta: !!value });
         case 'centre': return c({ cmd: 'carplayCentre', on: !!value });
         case 'hudalt': return c({ cmd: 'carplayHudAlt', on: !!value });
+        case 'badge': return c({ cmd: 'showBadge', on: !!value });
+        case 'perf': return c({ cmd: 'perfMode', on: !!value });
         default: return null;
         }
     }

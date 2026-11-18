@@ -270,6 +270,42 @@ async function withPreview(cp, target, stream, port) {
         first: firstAt - t1, pfirst: pfirstAt - t1, opaque: opaque };
 }
 
+/* server.js atlas(): I420 to the renderer's 4:2:0 atlas (the Y plane, then
+ * each chroma row as its U half and its V half) */
+function atlasOf(i420, w, h) {
+    const out = Buffer.alloc(w * h * 3 / 2), ySize = w * h, cw = w / 2, ch = h / 2, cSize = cw * ch;
+    i420.copy(out, 0, 0, ySize);
+    for (let y = 0; y < ch; y++) {
+        i420.copy(out, ySize + y * w, ySize + y * cw, ySize + (y + 1) * cw);
+        i420.copy(out, ySize + y * w + cw, ySize + cSize + y * cw, ySize + cSize + (y + 1) * cw);
+    }
+    return out;
+}
+
+/* The experimental performance mode's output (perfOutputArgs) as the tool
+ * runs it, with the preview: every decoded frame, each byte for byte the
+ * atlas the tool makes from I420. */
+async function perfMode(cp, target, stream, port) {
+    const T = cp.TARGETS[target], size = T.w * T.h * 3 / 2;
+    const ff = spawn(FFMPEG, ['-nostdin', '-hide_banner', '-loglevel', 'error'].concat(cp.inputArgs(port), cp.perfOutputArgs(target), cp.previewArgs()),
+        { stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] });
+    const parts = []; let err = '', pbytes = 0;
+    ff.stdout.on('data', (b) => parts.push(b));
+    ff.stdio[4].on('data', (b) => { pbytes += b.length; });
+    ff.stderr.on('data', (b) => { err += b; });
+    const sock = await connectWhenListening(port, 50);
+    sock.end(fs.readFileSync(stream));
+    const code = await new Promise((r) => ff.on('exit', r));
+    const got = Buffer.concat(parts);
+    /* the reference: the same fitting, every frame, I420, made into the atlas here */
+    const ref = execFileSync(FFMPEG, ['-v', 'error', '-f', 'h264', '-i', stream, '-map', '0:v:0', '-vf',
+        'scale=' + T.w + ':' + T.h + ':force_original_aspect_ratio=decrease:flags=bilinear,pad=' + T.w + ':' + T.h + ':-1:-1,format=yuv420p',
+        '-fps_mode', 'passthrough', '-f', 'rawvideo', 'pipe:1'], { maxBuffer: 1 << 30 });
+    let same = got.length === ref.length;
+    for (let i = 0; same && i < ref.length / size; i++) same = atlasOf(ref.slice(i * size, (i + 1) * size), T.w, T.h).equals(got.slice(i * size, (i + 1) * size));
+    return { frames: got.length / size, all: ref.length / size, same: same, pictures: pbytes / (cp.PREVIEW.w * cp.PREVIEW.h * 4), code: code, err: err.trim() };
+}
+
 async function streams(cp) {
     const cluster = makeStream(984, 480, 3), wide = makeStream(1088, 480, 3), hudSize = makeStream(1056, 384, 3);
     let r = await throughFfmpeg(cp, 'map', cluster, 46201);
@@ -296,6 +332,17 @@ async function streams(cp) {
         r.whole && r.code === 0 && !r.err && r.y(3, 2) > 200 && r.y(370, 180) > 200);
     r = await throughFfmpeg(cp, 'hud', wide, 46203);
     ok('hud while the phone is still on 1088x480: scaled to fit (' + r.frames + ' frames)', r.whole && r.frames >= 40 && r.code === 0);
+    const before = await throughFfmpeg(cp, 'map', cluster, 46213);
+    let m = await perfMode(cp, 'map', cluster, 46214);
+    /* the fps filter's count follows the stream's timestamps, not its frames
+     * (16 fps in: 20 a second out, duplicates; 30 in: frames dropped) */
+    ok('performance mode, map: every decoded frame once (' + m.frames + ' of ' + m.all + '; ' + before.frames + ' with the fps filter), each the atlas byte for byte, ' +
+        m.pictures + ' preview pictures, ffmpeg clean', m.same && m.frames === m.all && m.pictures >= 8 && m.code === 0 && !m.err);
+    m = await perfMode(cp, 'hud', hudSize, 46215);
+    ok('performance mode, hud (1056x384 fitted): every decoded frame (' + m.frames + ' of ' + m.all + '), each the atlas byte for byte', m.same && m.frames === m.all && m.code === 0 && !m.err);
+    const pargs = cp.perfOutputArgs('map').join(' ');
+    ok('performance mode: no fps filter, every frame once, the layer at the phone\'s 30 on the map and 15 on the HUD',
+        !/fps=/.test(pargs) && /-fps_mode passthrough/.test(pargs) && cp.PERF_FPS.map === 30 && cp.PERF_FPS.hud === 15);
     return cluster;
 }
 
@@ -471,11 +518,74 @@ async function server(cluster) {
     if (failed) console.log(logs.slice(-30).join('\n'));
 }
 
+/* The two 0.4.2 options end to end: a restart with the experimental
+ * performance mode on and a CarPlay output picked starts it again by itself
+ * (no tap), with every frame; a Stop forgets it; the badge switch and the
+ * mode's switch from the phone page and the control socket, saved. */
+async function perfServer(cluster) {
+    const state = tmpdir('cast-state-'), run = fakeRun({ armed: true, mode: 'alt' }), PORT = 18481;
+    fs.writeFileSync(path.join(state, 'settings.json'), JSON.stringify({ enabled: true, perfMode: true, carplayResume: 'map' }));
+    const inst = fakeInstall(run, 'HOOK111_MODE=alt\n');
+    const sock = path.join(tmpdir('cast-ctl-'), 'ctl.sock');
+    const logs = [];
+    const srv = spawn(process.execPath, [path.join(HERE, 'src', 'server.js')], {
+        env: Object.assign({}, process.env, { CAST_STATE: state, CAST_PORT: String(PORT), CAST_CTL_SOCKET: sock, CAST_HOOK_RUN: run, CAST_HOOK_VAR: inst.varDir, CAST_HOOK_ARM: inst.arm, CAST_FFMPEG: FFMPEG }),
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    srv.stdout.on('data', (d) => String(d).split('\n').forEach((l) => l && logs.push(l)));
+    srv.stderr.on('data', (d) => String(d).split('\n').forEach((l) => l && logs.push(l)));
+    const saved = () => JSON.parse(fs.readFileSync(path.join(state, 'settings.json'), 'utf8'));
+    const starts = () => logs.filter((l) => /play: CarPlay second screen on map/.test(l)).length;
+    try {
+        let token = null;
+        for (let i = 0; i < 50 && !token; i++) { await sleep(100); try { token = fs.readFileSync(path.join(state, 'token'), 'utf8').trim(); } catch (e) { /* not yet */ } }
+        let st = null;
+        for (let i = 0; i < 80 && !(st && st.state === 'playing'); i++) { await sleep(100); try { st = JSON.parse((await get(PORT, '/api/status', token)).body); } catch (e) { /* not yet */ } }
+        ok('performance mode after a restart: the CarPlay map starts again by itself (no tap), in the mode', st && st.state === 'playing' && st.output === 'map' &&
+            st.perf && st.perf.on === true && st.perf.resume === 'map' && logs.some((l) => /play: CarPlay second screen on map.*performance mode \(every frame, 30 fps layer/.test(l)));
+        ok('... the badge off by default', st.badge && st.badge.show === false && st.badge.shown === false);
+        const s = await connectWhenListening(6111, 50);
+        s.end(fs.readFileSync(cluster));
+        let frames = 0;
+        for (let i = 0; i < 60 && frames < 48; i++) { await sleep(100); frames = JSON.parse((await get(PORT, '/api/status', token)).body).frames || frames; }
+        ok('every frame of the hook\'s stream reaches the layer: ' + frames + ' of 48', frames === 48);
+        let r = await post(PORT, '/api/show-badge', token, { on: true });
+        st = r.code === 200 && JSON.parse(r.body);
+        ok('the phone page turns the badge on: saved; with no report from the renderer the map keeps the slot (as before)', st && st.badge.show === true &&
+            st.badge.shown === false && saved().showBadge === true);
+        const cb = await ctl(sock, { cmd: 'showBadge', on: false });
+        await sleep(200);
+        ok('control socket, showBadge off: saved', !cb.some((l) => l.ev === 'error') && saved().showBadge === false);
+        let n0 = starts();
+        const cm = await ctl(sock, { cmd: 'perfMode', on: false });
+        let n1 = n0;
+        for (let i = 0; i < 30 && n1 === n0; i++) { await sleep(100); n1 = starts(); }
+        ok('control socket, perfMode off: saved, the CarPlay picture started again as before (no "performance mode")', !cm.some((l) => l.ev === 'error') &&
+            saved().perfMode === false && n1 === n0 + 1 && !/performance mode/.test(logs.filter((l) => /play: CarPlay second screen on map/.test(l)).slice(-1)[0]));
+        r = await post(PORT, '/api/perf-mode', token, { on: true });
+        ok('the phone page turns it on again: saved', r.code === 200 && saved().perfMode === true && JSON.parse(r.body).perf.on === true);
+        r = await post(PORT, '/api/stop', token, {});
+        n0 = starts();
+        await sleep(7000);
+        st = JSON.parse((await get(PORT, '/api/status', token)).body);
+        ok('a Stop forgets the output: nothing starts by itself afterwards', st.state === 'idle' && saved().carplayResume === null && starts() === n0);
+        await ctl(sock, { cmd: 'carplay', output: 'hud' });
+        await sleep(300);
+        ok('picking the HUD remembers it', saved().carplayResume === 'hud');
+        r = await post(PORT, '/api/play', token, { url: 'http://127.0.0.1:9/x.mp4', output: 'map' });
+        ok('a stream URL from the phone forgets it (the user picked something else)', saved().carplayResume === null);
+    } finally {
+        srv.kill('SIGTERM');
+        await new Promise((res) => { srv.on('exit', res); setTimeout(res, 3000); });
+    }
+    if (failed) console.log(logs.slice(-30).join('\n'));
+}
+
 (async () => {
     const cp = unit();
     modes(cp);
     if (!fs.existsSync(FFMPEG)) { console.log('skip streams and server: no ffmpeg at ' + FFMPEG + ' (node tools/fetch_ffmpeg.js)'); }
-    else { const cluster = await streams(cp); await server(cluster); }
+    else { const cluster = await streams(cp); await server(cluster); await perfServer(cluster); }
     console.log(failed ? failed + ' FAILED' : 'all carplay tests passed');
     process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('FAIL ' + (e && e.stack)); process.exit(1); });

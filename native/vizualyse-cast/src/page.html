@@ -78,6 +78,14 @@
   <button id="stop">Stop</button>
 </div>
 
+<div class="card">
+  <label class="t">Cluster</label>
+  <div class="row"><span>Show the car's badge <span class="small" id="badgeNote"></span></span><input id="showBadge" type="checkbox"></div>
+  <div class="small" id="badgeSlot"></div>
+  <div class="row"><span>Experimental performance mode <span class="small" id="perfNote"></span></span><input id="perfMode" type="checkbox"></div>
+  <div class="small">The badge over the map while no route; during a route the map (and its directions card) over it, never BMW's turn box. The performance mode: the CarPlay picture with every frame, and started again by itself (after a car start, a stall, or the cluster's own map taking it back).</div>
+</div>
+
 <div class="card" style="margin-top:14px">
   <div class="st"><span class="dot" id="dot"></span><span id="state">—</span></div>
   <div class="meta" id="meta"></div>
@@ -162,6 +170,12 @@
     $('cpCentrePending').textContent = ce.pending ? '(' + ce.pending + ')' : '';
     $('cpHudAlt').disabled = !sw.installed;
     if (document.activeElement !== $('cpHudAlt')) $('cpHudAlt').checked = !!(s.carplay && s.carplay.hudAlt);
+    var bg = s.badge || {}, pf = s.perf || {};
+    if (document.activeElement !== $('showBadge')) $('showBadge').checked = !!bg.show;
+    $('badgeNote').textContent = bg.show ? '(' + (bg.shown ? 'shown' : 'map over it') + (bg.why ? ': ' + bg.why : '') + ')' : '';
+    $('badgeSlot').textContent = bg.slot ? 'Badge slot: ' + bg.slot.replace(/\n/g, ' · ') : '';
+    if (document.activeElement !== $('perfMode')) $('perfMode').checked = !!pf.on;
+    $('perfNote').textContent = pf.on ? '(' + (pf.packed ? 'packed upload' : 'exact upload') + (pf.note ? '; ' + pf.note : '') + ')' : '';
     $('sub').textContent = 'Uplink ' + s.uplink + ' · renderer ' + s.render;
     $('dot').className = 'dot ' + s.state;
     var names = {}; (s.outputs || []).forEach(function (o) { names[o.id] = o.title; });
@@ -230,6 +244,20 @@
     var box = this;
     box.disabled = true;
     api('/api/carplay-hud-alt', { on: box.checked })
+      .then(show).catch(function (e) { $('err').textContent = e.message; box.checked = !box.checked; })
+      .then(function () { box.disabled = false; });
+  };
+  $('perfMode').onchange = function () {
+    var box = this;
+    box.disabled = true;
+    api('/api/perf-mode', { on: box.checked })
+      .then(show).catch(function (e) { $('err').textContent = e.message; box.checked = !box.checked; })
+      .then(function () { box.disabled = false; });
+  };
+  $('showBadge').onchange = function () {
+    var box = this;
+    box.disabled = true;
+    api('/api/show-badge', { on: box.checked })
       .then(show).catch(function (e) { $('err').textContent = e.message; box.checked = !box.checked; })
       .then(function () { box.disabled = false; });
   };

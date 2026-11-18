@@ -14,6 +14,7 @@
  *            |  [QR]   |  +-----------------------------------------------+
  *            | link    |  Play the last stream again on
  *            | how to  |  [ Cluster map | HUD | This screen ]
+ *            |         |  (Show the car's badge) (Experimental performance mode)
  *            |         |  (Cast to cluster on/off) (QR code on the cluster)
  *            +---------+
  *
@@ -130,7 +131,11 @@ function castTab(m, chipW) {
     b.push({ id: 'replay', kind: 'seg', x: R.x, y: 210, w: R.w, h: 80, act: true, on: on && !!m.canReplay,
         options: outs.map((k) => ({ v: k, l: SHORT[k] })), value: m.state === 'playing' || m.state === 'paused' ? m.output : null });
 
-    const half = (R.w - 24) / 2;
+    const half = (R.w - 24) / 2, bg = m.badge || {}, pf = m.perf || {};
+    b.push({ id: 'badge', kind: 'toggle', x: R.x, y: 298, w: half, h: 72, act: true, on: on, value: !!bg.show,
+        label: "Show the car's badge", sub: !bg.show ? 'off: as the cluster renderer decides' : bg.route ? 'a route: the map over it' : 'shown while no route' });
+    b.push({ id: 'perf', kind: 'toggle', x: R.x + half + 24, y: 298, w: half, h: 72, act: true, on: on, value: !!pf.on,
+        label: 'Experimental performance mode', sub: pf.on ? 'the CarPlay picture: every frame, kept up' : 'off: as before' });
     b.push({ id: 'enabled', kind: 'toggle', x: R.x, y: 382, w: half, h: 80, act: true, value: on,
         label: 'Cast to cluster', sub: on ? 'on: the phone page is open' : 'off: nothing plays, the page is closed' });
     b.push({ id: 'qr', kind: 'toggle', x: R.x + half + 24, y: 382, w: half, h: 80, act: true, on: on, value: !!m.qr,
@@ -185,6 +190,8 @@ function infoTab(m) {
         ['CarPlay (hook111)', hook],
         ['Last stream', m.url ? m.url + (m.output ? ' · ' + (WHERE[m.output] || m.output) : '') : 'none yet'],
         ['Speed', speed],
+        ['Badge', !m.badge ? 'unknown' : (m.badge.show ? (m.badge.shown ? 'shown' : 'covered by the map') : 'as the renderer decides') + ' · ' + (m.badge.why || '')],
+        ['Performance mode', !m.perf || !m.perf.on ? 'off' : 'on · map ' + (m.perf.map || 'unknown') + (m.perf.note ? ' · ' + m.perf.note : '')],
     ];
     return [{ id: 'info', kind: 'info', x: 0, y: 0, w: 1300, h: 8 + rows.length * 56, rows: rows }];
 }

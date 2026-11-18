@@ -178,6 +178,7 @@ function state(run) {
         armed: armed, mode: mode, ready: ready, why: why, port: port, fellBack: fellBack,
         streaming: st.screen_b === 'up',
         frames: Number(st.b_frames) || 0,
+        sinkOut: Number(st.sink_frames_out) || 0,          /* frames the hook handed the tool's ffmpeg */
         display: st.display || null,                       /* what the phone was last offered */
         wanted: (readText(path.join(run, 'display')) || '').trim() || null,
         view: st.view === 'default' ? 'cluster' : st.view || null,   /* the view last offered */
@@ -305,6 +306,29 @@ function outputArgs(output) {
         'pad=' + t.w + ':' + t.h + ':-1:-1,fps=' + t.fps + ',format=yuv420p', '-f', 'rawvideo', 'pipe:1'];
 }
 
+/* The experimental performance mode's video output (server.js "Experimental
+ * performance mode"): the same fitting, then
+ *  - no fps filter: raw H.264 has no timestamps, so ffmpeg numbers the frames
+ *    at its default 25 a second and `fps` kept 4 in 5 of them whatever the
+ *    phone really sends (~18 a second gave the ~14.5 measured on the car),
+ *    unevenly, a frame late. Every decoded frame goes out once
+ *    (`-fps_mode passthrough`), and cluster-render writes the newest one at
+ *    up to the layer's rate (PERF_FPS), dropping the ones it can't;
+ *  - the renderer's 4:2:0 atlas made by ffmpeg (the Y plane, then each chroma
+ *    row as its U half and its V half: extractplanes, hstack, vstack, one
+ *    gray picture of w x 1.5h), byte for byte what server.js atlas() makes
+ *    from I420 (test/carplay_test.js), so the tool copies no rows. */
+function perfOutputArgs(output) {
+    const t = TARGETS[output];
+    return ['-filter_complex', '[0:v:0]scale=' + t.w + ':' + t.h + ':force_original_aspect_ratio=decrease:flags=bilinear,' +
+        'pad=' + t.w + ':' + t.h + ':-1:-1,format=yuv420p,extractplanes=y+u+v[y][u][v];[u][v]hstack=inputs=2[uv];' +
+        '[y][uv]vstack=inputs=2,format=gray[cast]', '-map', '[cast]', '-fps_mode', 'passthrough', '-f', 'rawvideo', 'pipe:1'];
+}
+/* The layer's rate in that mode: the map at the phone's own 30 (cluster-render's
+ * governor keeps the link within its cap whatever the rate); the HUD as it is
+ * (it gets at most half the budget). */
+const PERF_FPS = { map: 30, hud: 15 };
+
 /* The touch screen's live preview of the CarPlay map (its CarPlay tab): a
  * second, small output of the same ffmpeg, RGBA on fd 4, PREVIEW.fps
  * pictures a second, the phone's picture fitted into the preview's box
@@ -333,4 +357,4 @@ function switchState(o) {
     return { installed: true, on: saved === 'alt', saved: saved, pending: pending };
 }
 
-module.exports = { TARGETS, RUN, VAR, ARM, MODES, VIEWS, VIEW_TITLES, DEFAULT_PORT, state, savedMode, setMode, switchState, drawFor, safeAreaFor, safeText, wantDisplay, wantView, sceneUrl, wantScene, sceneTaken, requestZoom, inputArgs, outputArgs, PREVIEW, previewArgs, readKv, displayText };
+module.exports = { TARGETS, RUN, VAR, ARM, MODES, VIEWS, VIEW_TITLES, DEFAULT_PORT, state, savedMode, setMode, switchState, drawFor, safeAreaFor, safeText, wantDisplay, wantView, sceneUrl, wantScene, sceneTaken, requestZoom, inputArgs, outputArgs, perfOutputArgs, PERF_FPS, PREVIEW, previewArgs, readKv, displayText };

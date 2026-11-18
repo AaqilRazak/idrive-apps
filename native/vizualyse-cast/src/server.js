@@ -136,13 +136,43 @@ const cr = new ClusterRender('vizualyse_cast');
  * the cluster draws its direction list over it; the iDrive page shows it),
  * the CarPlay cluster cards (directions, time / distance; both on), whether the phone is
  * asked to centre its view (the target's safe area; on by default), and the
- * HUD's alternate mode (the wide 1056x384 picture, not centred; off). */
+ * HUD's alternate mode (the wide 1056x384 picture, not centred; off),
+ * showBadge (off: the car's badge over the map while no route; "The car's
+ * badge" below), perfMode (off: "Experimental performance mode" below) and
+ * carplayResume (the CarPlay output the user last picked, for perfMode). */
 const SETTINGS_FILE = path.join(STATE_DIR, 'settings.json');
-const settings = Object.assign({ enabled: true, clusterQr: false, carplayDirections: true, carplayEta: true, carplayCentre: true, carplayHudAlt: false }, readJson(SETTINGS_FILE) || {});
+const settings = Object.assign({ enabled: true, clusterQr: false, carplayDirections: true, carplayEta: true, carplayCentre: true, carplayHudAlt: false, showBadge: false, perfMode: false, carplayResume: null }, readJson(SETTINGS_FILE) || {});
 settings.carplayCentre = settings.carplayCentre !== false;
 settings.carplayHudAlt = settings.carplayHudAlt === true;
 settings.carplayDirections = settings.carplayDirections !== false;
 settings.carplayEta = settings.carplayEta !== false;
+settings.showBadge = settings.showBadge === true;
+settings.perfMode = settings.perfMode === true;
+settings.carplayResume = settings.carplayResume === 'map' || settings.carplayResume === 'hud' ? settings.carplayResume : null;
+
+/* ---- the car's badge --------------------------------------------------------
+ * The model badge (M340i, ...) is not in the map's slot (0x100) but in a small
+ * one over it, 0x105 (0x103 on some cars), where BMW's HMI also maps its
+ * CarPlay turn box (content 0x1000310) for a route. cluster-render's guide
+ * hold covers that slot with an empty scene, so the map shows there, while
+ * the box is mapped in it, shown or parked (map status 1, 2 or 3), and a
+ * layer on the map lets it (guide_hold, default 1). Where the HMI keeps the
+ * box mapped without a route, that covers the badge all the time.
+ *
+ * showBadge off: Cast's layers let the hold work as cluster-render decides
+ * (as before 0.4.2). On: Cast decides from the slot table whether a route is
+ * up, and lets the hold work only then:
+ *  - released (guide_hold 0): the badge shows. The box mapped and visible in
+ *    the slot (map status 1 or 2) is a route: held.
+ *  - held: the map has the slot (the CarPlay map and its directions card show
+ *    there; neither the badge nor BMW's box). Released once no box is mapped
+ *    in either slot for BADGE_RELEASE_MS (the route over).
+ * BMW's box can show for a moment at a route's start (from its first report
+ * to cluster-render's take-over), as with cluster-render's own hold. Without
+ * the slot table (no report yet): held, as cluster-render would. */
+const BOX = 0x1000310, BADGE_SLOTS = [0x105, 0x103], BADGE_RELEASE_MS = 5000;
+const badge = { hold: true, route: null, since: Date.now(), boxGone: null, text: null, why: 'no report from cluster-render yet' };
+function guideHold() { return settings.showBadge ? badge.hold : true; }
 delete settings.carplayView;   /* 0.3.6's view setting: the two card switches replace it */
 delete settings.carplayShape; delete settings.carplayVignette;   /* 0.3.5's, removed */
 function saveSettings() {
@@ -184,7 +214,7 @@ function updateQr() {
         /* contend: take the centre from the stock map (cluster-render's
          * take-over), as the Waze map does; without it the layer waits for a
          * free slot, which in Map view never comes. */
-        qrLayer = cr.image({ target: 'map', contend: true, x: Math.round((W - q.size) / 2), y: Math.round((H - q.size) / 2),
+        qrLayer = cr.image({ target: 'map', contend: true, guide_hold: guideHold(), x: Math.round((W - q.size) / 2), y: Math.round((H - q.size) / 2),
             w: q.size, h: q.size, iw: q.size, ih: q.size, visible: show });
         cr.pixels(qrLayer, null, q.px);
         qrUrl = url;
@@ -311,12 +341,14 @@ function play(opts) {
     const asked = askedOff(opts.output);
     if (asked.length) { pause(opts, asked); return; }
     const cp = opts.source === 'carplay';
+    /* the experimental performance mode: the CarPlay picture only */
+    const perf = cp && settings.perfMode;
     let o = OUTPUTS[opts.output];
     if (cp) {
         /* the size the phone should draw at (from its next connection), and
          * what goes on to the renderer */
         const t = carplay.TARGETS[opts.output];
-        o = Object.assign({}, o, { w: t.w, h: t.h, fps: t.fps }, t.xband ? { xband: t.xband } : {}, t.band ? { band: t.band } : {});
+        o = Object.assign({}, o, { w: t.w, h: t.h, fps: perf ? carplay.PERF_FPS[opts.output] || t.fps : t.fps }, t.xband ? { xband: t.xband } : {}, t.band ? { band: t.band } : {});
         try {
             const d = carplay.wantDisplay(opts.output, undefined, settings.carplayCentre, settings.carplayHudAlt);
             if (d) log('carplay: asking for ' + d.wanted + (d.safearea ? ', safe area ' + d.safearea : ', no safe area') +
@@ -336,7 +368,7 @@ function play(opts) {
     if (cp) {
         /* live: no -re; the hook connects to this listener */
         args.push.apply(args, carplay.inputArgs(carplay.state().port));
-        args.push.apply(args, carplay.outputArgs(opts.output));
+        args.push.apply(args, perf ? carplay.perfOutputArgs(opts.output) : carplay.outputArgs(opts.output));
         if (preview) args.push.apply(args, carplay.previewArgs());
     } else {
         if (opts.realtime) args.push('-re');
@@ -357,9 +389,10 @@ function play(opts) {
     const env = Object.assign({}, process.env, { http_proxy: 'http://127.0.0.1:' + PROXY_PORT, https_proxy: 'http://127.0.0.1:' + PROXY_PORT });
     /* fd 3: the sound; fd 4: the CarPlay preview */
     const ff = spawn(FFMPEG, args, { env: env, stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] });
-    const p = { ff: ff, py: null, opts: opts, video: null, started: Date.now(), frames: 0, lastErr: [] };
+    const p = { ff: ff, py: null, opts: opts, video: null, started: Date.now(), frames: 0, lastErr: [], perf: perf };
     player = p;
-    log('play: ' + opts.shown + ' on ' + opts.output + (opts.audio ? ' with audio at ' + opts.volume + '%' : ' without audio') + (preview ? ', a preview for the touch screen' : ''));
+    log('play: ' + opts.shown + ' on ' + opts.output + (opts.audio ? ' with audio at ' + opts.volume + '%' : ' without audio') + (preview ? ', a preview for the touch screen' : '') +
+        (perf ? ', performance mode (every frame, ' + o.fps + ' fps layer' + (cr.alwaysPacked ? ', always_packed' : '') + ')' : ''));
     ff.on('error', (e) => { p.lastErr.push('ffmpeg: ' + e.message); log('ffmpeg: ' + e.message); });
     /* the preview's pictures: always read (a full pipe would hold the
      * cluster's output back too), kept only while the touch screen draws them */
@@ -384,9 +417,33 @@ function play(opts) {
         if (o.console) consoleVideo.start(o.w, o.h, o.fps);
         /* prewarm: ask for the slot before the first frame (ffmpeg takes a
          * second or two to start); contend: take it from the stock content. */
-        if (!o.console) p.video = cr.video({ target: o.target, z: 1, contend: true, prewarm: true, x: r.x, y: r.y, w: r.w, h: r.h, vw: o.w, vh: o.h, fps: o.fps });
+        if (!o.console) {
+            /* performance mode: every write as cluster-render's packed blocks,
+             * only the changed ones (a service that doesn't offer it ignores
+             * it and writes the layer exact) */
+            p.layerOpts = { target: o.target, z: 1, contend: true, prewarm: true, guide_hold: guideHold(), x: r.x, y: r.y, w: r.w, h: r.h, vw: o.w, vh: o.h, fps: o.fps };
+            if (perf && o.h % 4 === 0) p.layerOpts.always_packed = true;
+            p.video = cr.video(p.layerOpts);
+        }
         let parts = [], have = 0;
-        ff.stdout.on('data', (d) => {
+        if (perf) {
+            /* ffmpeg sends the atlas itself: each frame is copied once, into
+             * one buffer kept for the run (cr.frame copies it on) */
+            const frame = Buffer.alloc(size);
+            ff.stdout.on('data', (d) => {
+                let off = 0;
+                while (off < d.length) {
+                    const n = Math.min(size - have, d.length - off);
+                    d.copy(frame, have, off, off + n);
+                    have += n; off += n;
+                    if (have === size) {
+                        have = 0;
+                        cr.frame(p.video, frame, ++p.frames);
+                        if (p.frames === 1) { log('play: first frame'); updateQr(); }
+                    }
+                }
+            });
+        } else ff.stdout.on('data', (d) => {
             parts.push(d);
             have += d.length;
             while (have >= size) {
@@ -443,6 +500,9 @@ function play(opts) {
             /* a run that showed nothing waits longer each time (up to 30 s), so
              * a listener that can't start doesn't spin */
             restartDelay = p.frames ? 1000 : Math.min(30000, restartDelay * 2);
+            /* performance mode: while hook111 says the phone streams, the next
+             * run can take it at once: at most 3 s between runs, not 30 */
+            if (p.perf && !p.frames && carplayStreaming()) restartDelay = Math.min(restartDelay, 3000);
             last = { state: 'waiting', url: opts.shown, output: opts.output, frames: p.frames,
                 note: 'listening again for the second screen in ' + Math.round(restartDelay / 1000) + ' s', error: last.error };
             restartTimer = setTimeout(() => { restartTimer = null; if (!player && lastPlay === opts && settings.enabled && !stopping) play(opts); }, restartDelay);
@@ -468,6 +528,8 @@ function status() {
         carplay: { armed: c.armed, ready: c.ready, why: c.why, mode: c.mode, streaming: c.streaming, frames: c.frames,
             display: c.display, wanted: c.wanted, size: c.size, switch: carplaySwitch(), cards: carplayCards(c), centre: carplayCentre(c), hudAlt: settings.carplayHudAlt,
             night: { now: c.night, car: c.nightCar, acked: c.nightAcked } },
+        badge: { show: settings.showBadge, shown: settings.showBadge && !badge.hold, route: badge.route, why: badge.why, slot: badge.text },
+        perf: { on: settings.perfMode, packed: !!cr.alwaysPacked, resume: settings.carplayResume, map: mapTarget.state, note: perfNote },
         outputs: Object.keys(OUTPUTS).filter((k) => k !== 'console' || consoleOut.available()).map((k) => ({ id: k, title: OUTPUTS[k].title })) }, s);
 }
 
@@ -561,11 +623,20 @@ const web = http.createServer((req, res) => {
             const audio = b.audio !== false;
             if (output === 'none' && !audio) return json(res, 400, { error: 'nothing to play: no video output and no audio' });
             const volume = Math.max(0, Math.min(150, Math.round(Number(b.volume) || 60)));
+            forgetResume('a stream from the phone');
             play({ url: url.href, shown: redact(url.href), output: output, audio: audio, volume: volume, realtime: b.realtime !== false });
             return json(res, 200, status());
         }
         if (u.pathname === '/api/carplay-centre') {
             setCarplayCentre(b.on === true);
+            return json(res, 200, status());
+        }
+        if (u.pathname === '/api/perf-mode') {
+            setPerfMode(b.on === true);
+            return json(res, 200, status());
+        }
+        if (u.pathname === '/api/show-badge') {
+            setShowBadge(b.on === true);
             return json(res, 200, status());
         }
         if (u.pathname === '/api/carplay-hud-alt') {
@@ -584,7 +655,7 @@ const web = http.createServer((req, res) => {
             const why = setCarplayMode(b.mode);
             return why ? json(res, 400, { error: why }) : json(res, 200, status());
         }
-        if (u.pathname === '/api/stop') { stopPlayer('stopped from the phone'); return json(res, 200, status()); }
+        if (u.pathname === '/api/stop') { forgetResume('stopped from the phone'); stopPlayer('stopped from the phone'); return json(res, 200, status()); }
         if (u.pathname === '/api/qr') { setQr(!!b.show); return json(res, 200, status()); }
         json(res, 404, { error: 'not found' });
     });
@@ -599,7 +670,9 @@ function carplayOpts(output) {
 function playCarplay(output) {
     const c = carplay.state();
     if (!c.ready) return 'the CarPlay second screen is not available: ' + c.why;
-    play(carplayOpts(output === 'hud' ? 'hud' : 'map'));
+    const out = output === 'hud' ? 'hud' : 'map';
+    if (settings.carplayResume !== out) { settings.carplayResume = out; saveSettings(); }
+    play(carplayOpts(out));
     return null;
 }
 
@@ -613,6 +686,7 @@ function setCarplayMode(mode) {
     let r;
     try { r = carplay.setMode(mode); } catch (e) { log('hook111: mode ' + mode + ': ' + e.message); return e.message; }
     log('hook111: mode ' + r.mode + ' saved; ' + r.note);
+    if (r.mode === 'off') forgetResume('the CarPlay second screen turned off');
     if (r.mode === 'off' && player && player.opts.source === 'carplay') stopPlayer('the CarPlay second screen turned off');
     return null;
 }
@@ -693,6 +767,166 @@ function setCarplayHudAlt(on) {
     return null;
 }
 
+/* Cast's layers on the map take the hold Cast wants now (guideHold()). */
+function applyGuideHold() {
+    const hold = guideHold();
+    if (player && player.video && o0(player).target === 'map') cr.set(player.video, { guide_hold: hold });
+    if (qrLayer) cr.set(qrLayer, { guide_hold: hold });
+}
+function setShowBadge(on) {
+    settings.showBadge = !!on;
+    saveSettings();
+    applyGuideHold();
+    if (cr.ready) cr.status();
+    log('badge: ' + (on ? 'shown while no route (the map over it during a route)' : 'as cluster-render decides (its guide hold)'));
+    return null;
+}
+
+/* ---- the experimental performance mode -------------------------------------
+ * settings.perfMode, off by default; on: the CarPlay picture (not a stream
+ * URL) and its recovery, each audited for the car's safety first (README.md
+ * "Experimental performance mode"):
+ *  - every decoded frame to the renderer, which writes the newest at up to
+ *    PERF_FPS (no ffmpeg fps filter dropping frames on made-up timestamps);
+ *  - ffmpeg makes the renderer's atlas (no row copies in the tool);
+ *  - cluster-render's always_packed, where it offers it;
+ *  - the CarPlay output the user last picked starts again by itself once
+ *    hook111 is ready (a car start, a restart of the tool) until a Stop, a
+ *    stream URL or the second screen turned off (carplayResume);
+ *  - at most 3 s between listener runs while the phone streams (not 30);
+ *  - a stalled ffmpeg (the phone's frames reach hook111, none reach the
+ *    tool for STALL_MS) is started again;
+ *  - the cluster map taken back by the stock map: after RETAKE_AFTER_MS
+ *    parked behind it (or waiting while it holds the slot), the layer is made
+ *    again, as a Cluster tap does, at most once a RETAKE_GAP_MS and
+ *    RETAKE_MAX times before the map is shown again; never for a slot lock
+ *    (a warning, a door), a refusal, or the HUD (which gives way to calls). */
+const STALL_MS = 5000, STALL_GAP_MS = 20000;
+const RETAKE_AFTER_MS = 20000, RETAKE_GAP_MS = 60000, RETAKE_MAX = 3, RETAKE_SHOWN_MS = 10000;
+let perfNote = null;   /* the last thing the mode did, for the status */
+const mapTarget = { state: null, holder: null, reason: '', since: Date.now(), retakes: 0, lastRetake: -Infinity };
+let lastStallKill = -Infinity, lastResumeTry = -Infinity;
+
+function setPerfMode(on) {
+    settings.perfMode = !!on;
+    saveSettings();
+    perfNote = null;
+    log('perf: experimental performance mode ' + (on ? 'on' : 'off') + (player && player.opts.source === 'carplay' ? ': the CarPlay picture starts again with it' : ''));
+    /* the picture playing takes it now: ffmpeg's arguments and the layer change */
+    if (player && player.opts.source === 'carplay' && settings.enabled) play(carplayOpts(player.opts.output));
+    return null;
+}
+function forgetResume(why) {
+    if (settings.carplayResume === null) return;
+    settings.carplayResume = null;
+    saveSettings();
+    log('perf: the CarPlay output is not started again by itself any more (' + why + ')');
+}
+function carplayStreaming() { try { return carplay.state().streaming; } catch (e) { return false; } }
+function perfNoteSet(t) { perfNote = t; log('perf: ' + t); }
+
+/* Once a second while the mode is on. */
+function perfTick(now) {
+    if (!settings.perfMode || stopping) return;
+    let c = null;
+    try { c = carplay.state(); } catch (e) { return; }
+    /* the CarPlay output the user picked, again by itself */
+    if (settings.enabled && settings.carplayResume && !player && !paused && !restartTimer && c.ready && now - lastResumeTry >= 5000) {
+        lastResumeTry = now;
+        perfNoteSet('starting the CarPlay picture on ' + settings.carplayResume + ' again by itself');
+        play(carplayOpts(settings.carplayResume));
+        return;
+    }
+    const p = player;
+    if (!p || !p.perf) return;
+    /* a stalled ffmpeg: the phone's frames come, ours don't */
+    if (!p.wd) p.wd = { at: now, hook: c.frames, ours: p.frames };
+    else if (now - p.wd.at >= STALL_MS) {
+        const hookMoved = c.frames - p.wd.hook >= 10, oursMoved = p.frames > p.wd.ours;
+        if (hookMoved && !oursMoved && now - p.started > 8000 && now - lastStallKill > STALL_GAP_MS) {
+            lastStallKill = now;
+            perfNoteSet('no frame for ' + Math.round((now - p.wd.at) / 1000) + ' s while the phone streams: ffmpeg started again');
+            try { p.ff.kill('SIGKILL'); } catch (e) { /* gone */ }   /* its exit starts it again */
+        }
+        p.wd = { at: now, hook: c.frames, ours: p.frames };
+    }
+    /* the cluster map taken back by the stock map */
+    if (p.video && p.layerOpts && p.layerOpts.target === 'map') {
+        const t = mapTarget;
+        if (t.state === 'shown' && now - t.since >= RETAKE_SHOWN_MS) t.retakes = 0;
+        const behind = t.holder === 'stock' && !/lock|refused/i.test(t.reason || '') &&
+            (t.state === 'parked' || (t.state === 'waiting' && /slot in use/.test(t.reason || '')));
+        if (behind && now - t.since >= RETAKE_AFTER_MS && now - t.lastRetake >= RETAKE_GAP_MS && t.retakes < RETAKE_MAX) {
+            t.retakes++; t.lastRetake = now;
+            perfNoteSet('the cluster map behind the stock map for ' + Math.round((now - t.since) / 1000) + ' s: asked for again (' + t.retakes + ' of ' + RETAKE_MAX + ')');
+            const old = p.video;
+            cr.drop(old);
+            p.layerOpts.guide_hold = guideHold();
+            p.video = cr.video(p.layerOpts);
+            t.since = now;
+        }
+    }
+}
+
+/* The slot table's rows for a slot: [{ content, klass, map }] (cluster-render's
+ * status: "slot 0x105 status 2: 0x1000310 class 0 map 1, ..."). */
+function slotRows(lines, slot) {
+    const want = 'slot 0x' + slot.toString(16) + ' ';
+    const l = lines.find((x) => x.indexOf(want) === 0);
+    if (!l) return null;
+    const out = [], re = /0x([0-9a-f]+) class (\d+) map (\d+)/g;
+    let m;
+    while ((m = re.exec(l))) out.push({ content: parseInt(m[1], 16), klass: Number(m[2]), map: Number(m[3]) });
+    return out;
+}
+
+/* A status from cluster-render (asked for every 2 s, BADGE_POLL_MS): the
+ * badge's slots, the route decision, and the map target's line for the
+ * Info tab. */
+function onRenderStatus(text) {
+    const lines = String(text || '').split('\n').map((l) => l.trim());
+    const now = Date.now();
+    let boxMapped = false, boxVisible = false, any = false;
+    BADGE_SLOTS.forEach((slot) => {
+        const rows = slotRows(lines, slot);
+        if (!rows) return;
+        any = true;
+        rows.forEach((r) => {
+            if (r.content !== BOX) return;
+            if (r.map >= 1) boxMapped = true;
+            if (r.map === 1 || r.map === 2) boxVisible = true;
+        });
+    });
+    const shown = lines.filter((l) => /^target guide/.test(l) || /^slot 0x10[35] /.test(l))
+        .sort((x, y) => (x[0] === 's' ? 0 : 1) - (y[0] === 's' ? 0 : 1));   /* the KOMBI's rows first */
+    const t = shown.length ? shown.join('\n') : null;
+    if (t !== badge.text) log('badge: ' + (t ? t.replace(/\n/g, ' | ') : 'cluster-render names no guide target or badge slot'));
+    badge.text = t;
+    const was = badge.hold;
+    if (!any) {
+        /* the KOMBI hasn't reported either slot: as cluster-render would */
+        badge.hold = true; badge.route = null; badge.why = 'the badge slot is not reported yet';
+    } else if (!badge.hold || badge.route === null) {
+        badge.route = boxVisible;
+        badge.hold = boxVisible;
+        badge.boxGone = null;
+        badge.why = boxVisible ? 'BMW\'s turn box is up: a route' : boxMapped ? 'BMW\'s turn box parked: no route' : 'no turn box: no route';
+    } else {
+        /* held: the box is parked behind ours whatever the route does; the
+         * route is over once it is gone from both slots for a while */
+        if (boxMapped) badge.boxGone = null;
+        else if (badge.boxGone === null) badge.boxGone = now;
+        if (badge.boxGone !== null && now - badge.boxGone >= BADGE_RELEASE_MS) {
+            badge.hold = false; badge.route = false; badge.boxGone = null; badge.why = 'the turn box is gone: the route is over';
+        } else badge.why = 'a route: the map over the badge';
+    }
+    if (badge.hold !== was) {
+        badge.since = now;
+        log('badge: ' + (badge.hold ? 'map over the badge slot' : 'badge shown') + ' (' + badge.why + ')');
+        if (settings.showBadge) applyGuideHold();
+    }
+}
+
 /* The iDrive app's commands over the control socket: null, or why not. */
 function setQr(show) { qrWanted = show; settings.clusterQr = show; saveSettings(); updateQr(); }
 
@@ -729,9 +963,11 @@ function command(c) {
     if (c.cmd === 'carplayZoom') return carplayZoom(c.dir);
     if (c.cmd === 'carplayCentre') return setCarplayCentre(c.on === true);
     if (c.cmd === 'carplayHudAlt') return setCarplayHudAlt(c.on === true);
+    if (c.cmd === 'showBadge') return setShowBadge(c.on === true);
+    if (c.cmd === 'perfMode') return setPerfMode(c.on === true);
     if (!settings.enabled) return 'Cast to cluster is off';
     if (c.cmd === 'carplay') return playCarplay(c.output);
-    if (c.cmd === 'stop') { stopPlayer('stopped on the iDrive page'); return null; }
+    if (c.cmd === 'stop') { forgetResume('stopped on the iDrive page'); stopPlayer('stopped on the iDrive page'); return null; }
     if (c.cmd === 'qr') { setQr(!!c.show); return null; }
     if (c.cmd === 'replay') {
         if (!lastPlay) return 'nothing played yet: start a stream from the phone first';
@@ -741,6 +977,7 @@ function command(c) {
             if (output === 'console' || output === 'none') return 'the CarPlay second screen goes to the cluster map or the HUD';
             return playCarplay(output);
         }
+        forgetResume('the last stream again');
         play(Object.assign({}, lastPlay, { output: output, audio: lastPlay.audio || output === 'none' }));
         return null;
     }
@@ -768,11 +1005,18 @@ function shutdown(sig) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-cr.on('ready', () => { log('render: connected (' + cr.backend + ')'); updateQr(); });
+cr.on('ready', () => { log('render: connected (' + cr.backend + (cr.alwaysPacked ? ', always_packed offered' : '') + ')'); updateQr(); });
 cr.on('disconnected', () => log('render: disconnected'));
+cr.on('status', onRenderStatus);
 cr.on('layer', (ref, state, reason) => log('render: layer ' + ref + (ref === qrLayer ? ' (qr)' : player && ref === player.video ? ' (video)' : '') +
     ' ' + state + (reason ? ': ' + reason : '')));
-cr.on('target', (t, state, holder, reason) => log('render: target ' + t + ' ' + state + (holder && holder !== 'none' ? ' (holder ' + holder + ')' : '') + (reason ? ': ' + reason : '')));
+cr.on('target', (t, state, holder, reason) => {
+    /* the map's state, for the performance mode's retake */
+    if (t === 'map' && (state !== mapTarget.state || holder !== mapTarget.holder || (reason || '') !== mapTarget.reason)) {
+        Object.assign(mapTarget, { state: state, holder: holder, reason: reason || '', since: Date.now() });
+    }
+    log('render: target ' + t + ' ' + state + (holder && holder !== 'none' ? ' (holder ' + holder + ')' : '') + (reason ? ': ' + reason : ''));
+});
 cr.on('refused', (op, ref, reason) => log('render: refused ' + op + ' ' + ref + (reason ? ': ' + reason : '')));
 
 if (settings.enabled) {
@@ -790,3 +1034,12 @@ cr.connect();
  * run directory can appear after this tool starts: keep its view current. */
 syncScene();
 setInterval(() => { updateQr(); syncScene(); }, 5000);
+/* cluster-render's status: every 2 s while the badge is wanted (its route
+ * decision), else every 10 s (the Info tab's badge slot) */
+let statusTick = 0;
+setInterval(() => {
+    const now = Date.now();
+    statusTick++;
+    if (cr.ready && (settings.showBadge ? statusTick % 2 === 0 : statusTick % 10 === 0)) cr.status();
+    perfTick(now);
+}, 1000);
