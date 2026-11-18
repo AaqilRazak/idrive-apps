@@ -190,9 +190,9 @@ async function main() {
     assert(/<component id="21" type="label" widget="LT_Label_1Graphic_Scalable">/.test(XML), 'the QR is a scalable graphic label');
     const buttons = Object.keys(comps).filter((id) => comps[id].type === 'button').map((id) => comps[id].name).sort();
     assert.deepStrictEqual(buttons, ['castCarplayCentre', 'castCarplayDirections', 'castCarplayEta', 'castCarplayHud', 'castCarplayHudAlt', 'castCarplayMap', 'castCarplayOn', 'castCarplayZoomIn', 'castCarplayZoomOut',
-        'castConsole', 'castEnable', 'castHud', 'castMap', 'castQrToggle', 'castStop', 'castTouch']);
+        'castConsole', 'castEnable', 'castHud', 'castMap', 'castPerfMode', 'castQrToggle', 'castShowBadge', 'castStop', 'castTouch']);
     assert.strictEqual(UI.containers['1'].components['46'].name, 'castTouch');
-    console.log('ok   page: 16 buttons (Touch screen first), a QR graphic, an empty screen state, the speed in the manifest, ASCII, xml and uiDescription agree');
+    console.log('ok   page: 18 buttons (Touch screen first), a QR graphic, an empty screen state, the speed in the manifest, ASCII, xml and uiDescription agree');
 
     process.exit = (code) => { throw new Error('process.exit(' + code + ')'); };
     runSource();
@@ -312,6 +312,36 @@ async function main() {
     byName.castCarplayHudAlt.emit('action');
     await until('HUD alternate off sent', () => received.some((c) => c.cmd === 'carplayHudAlt' && c.on === false));
     console.log('ok   the HUD alternate mode: shown; a press toggles it (carplayHudAlt)');
+
+    /* Cast to cluster 0.4.2's two options, on the list beside the CarPlay ones */
+    assert(byName.castShowBadge.text === "Show the car's badge: needs Cast to cluster 0.4.2" && byName.castShowBadge.enabled === false &&
+        byName.castPerfMode.text === 'Experimental performance mode: needs Cast to cluster 0.4.2' && byName.castPerfMode.enabled === false,
+        'an older Cast to cluster: both rows say they need 0.4.2 and cannot be pressed');
+    st = Object.assign({}, st, { badge: { show: false, shown: false, route: null, why: 'x' }, perf: { on: false, note: null } });
+    control.broadcast();
+    await until('badge and perf rows on', () => byName.castShowBadge.enabled === true && byName.castShowBadge.text === "Show the car's badge: off" &&
+        byName.castPerfMode.enabled === true && byName.castPerfMode.text === 'Experimental performance mode: off');
+    await sleep(450);
+    byName.castShowBadge.emit('action');
+    await until('showBadge on sent', () => received.some((c) => c.cmd === 'showBadge' && c.on === true));
+    st = Object.assign({}, st, { badge: { show: true, shown: true, route: false, why: 'no turn box: no route' } });
+    control.broadcast();
+    await until('badge shown text', () => byName.castShowBadge.text === "Show the car's badge: on - shown (no route)");
+    st = Object.assign({}, st, { badge: { show: true, shown: false, route: true, why: 'a route' } });
+    control.broadcast();
+    await until('badge covered text', () => byName.castShowBadge.text === "Show the car's badge: on - map over it (a route)");
+    await sleep(450);
+    byName.castShowBadge.emit('action');
+    await until('showBadge off sent', () => received.some((c) => c.cmd === 'showBadge' && c.on === false));
+    byName.castPerfMode.emit('action');
+    await until('perfMode on sent', () => received.some((c) => c.cmd === 'perfMode' && c.on === true));
+    st = Object.assign({}, st, { perf: { on: true, note: null } });
+    control.broadcast();
+    await until('perf on text', () => byName.castPerfMode.text === 'Experimental performance mode: on');
+    await sleep(450);
+    byName.castPerfMode.emit('action');
+    await until('perfMode off sent', () => received.some((c) => c.cmd === 'perfMode' && c.on === false));
+    console.log("ok   the car's badge and the performance mode: on the list, each shown and toggled by a press (showBadge, perfMode)");
     st = Object.assign({}, st, { carplay: { armed: true, ready: true, mode: 'alt', switch: { installed: true, on: true, pending: null } } });
     control.broadcast();
     await until('carplay enabled', () => byName.castCarplayMap.enabled === true && byName.castCarplayHud.enabled === true);

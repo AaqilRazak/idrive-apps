@@ -20,7 +20,9 @@
  * text; Cast to cluster on or off; Stop; the CarPlay second screen on or
  * off (hook111's mode, now and for later starts); its cluster view (map and
  * directions, map only, directions only); the CarPlay map (CarPlay's own
- * second screen, through hook111) on the cluster or on the HUD;
+ * second screen, through hook111) on the cluster or on the HUD; the car's
+ * badge over the map while no route, and the experimental performance mode
+ * (Cast to cluster 0.4.2's two options, on or off);
  * Play last on the cluster map / the HUD / this screen, which replay the
  * last stream the phone started (its URL stays in the tool); and the QR code
  * on the cluster on or off. The app holds the tool's control
@@ -46,7 +48,7 @@ const SCREEN_NAME = 'ST_OnlineApps_VizualyseCastScreen';
 const N = {
     status: 'castStatus', touch: 'castTouch', qr: 'castQr', link: 'castLink', hint: 'castHint', stop: 'castStop',
     map: 'castMap', hud: 'castHud', console: 'castConsole', qrToggle: 'castQrToggle', info: 'castInfo',
-    enable: 'castEnable', carplayOn: 'castCarplayOn', carplayDirections: 'castCarplayDirections', carplayEta: 'castCarplayEta', carplayZoomIn: 'castCarplayZoomIn', carplayZoomOut: 'castCarplayZoomOut', carplayCentre: 'castCarplayCentre', carplayHudAlt: 'castCarplayHudAlt', carplayMap: 'castCarplayMap', carplayHud: 'castCarplayHud',
+    enable: 'castEnable', carplayOn: 'castCarplayOn', carplayDirections: 'castCarplayDirections', carplayEta: 'castCarplayEta', carplayZoomIn: 'castCarplayZoomIn', carplayZoomOut: 'castCarplayZoomOut', carplayCentre: 'castCarplayCentre', carplayHudAlt: 'castCarplayHudAlt', showBadge: 'castShowBadge', perfMode: 'castPerfMode', carplayMap: 'castCarplayMap', carplayHud: 'castCarplayHud',
 };
 const PRESS_DEDUPE_MS = 400;
 const ROW_CHARS = 90;
@@ -172,6 +174,8 @@ class CastApp extends OnlineApp {
         this._bind(N.carplayZoomOut, () => this._control.zoom('out'));
         this._bind(N.carplayCentre, () => this._control.setCarplayCentre(!this._control.carplayCentre().on));
         this._bind(N.carplayHudAlt, () => this._control.setCarplayHudAlt(!this._control.carplayHudAlt()));
+        this._bind(N.showBadge, () => this._control.setShowBadge(!this._control.showBadge()));
+        this._bind(N.perfMode, () => this._control.setPerfMode(!this._control.perfMode()));
         this._bind(N.carplayMap, () => this._control.carplay('map'));
         this._bind(N.carplayHud, () => this._control.carplay('hud'));
         this._bind(N.map, () => this._control.replay('map'));
@@ -323,6 +327,11 @@ class CastApp extends OnlineApp {
         en(N.carplayCentre, up && c.carplaySwitch().installed);
         this._write(N.carplayHudAlt, c.hudAltText());
         en(N.carplayHudAlt, up && c.carplaySwitch().installed);
+        /* Cast to cluster 0.4.2's options: pressable once the tool says it has them */
+        this._write(N.showBadge, c.badgeText());
+        en(N.showBadge, up && c.hasBadge());
+        this._write(N.perfMode, c.perfText());
+        en(N.perfMode, up && c.hasPerf());
         en(N.carplayMap, on && c.canCarplay());
         en(N.carplayHud, on && c.canCarplay());
         ['map', 'hud', 'console'].forEach((k) => {

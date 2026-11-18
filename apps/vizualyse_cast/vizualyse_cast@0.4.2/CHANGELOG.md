@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2
+
+- Two rows on the list, after the HUD alternate mode: "Show the car's
+  badge" (the model badge over the map while no route; during a route the
+  CarPlay map over it, never BMW's turn box) and "Experimental performance
+  mode". A press toggles each, as the directions card's row does. Needs
+  Cast to cluster 0.4.2 (required): an older one shows "needs Cast to
+  cluster 0.4.2" and the row can't be pressed.
+
 ## 0.4.1
 
 - The touch screen stays while driving (platform app/touch_mode 1.1.0):

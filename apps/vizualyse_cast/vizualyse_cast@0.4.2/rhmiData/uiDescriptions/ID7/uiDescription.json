@@ -479,6 +479,50 @@
               }
             }
           ]
+        },
+        "47": {
+          "type": "button",
+          "name": "castShowBadge",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "Show the car's badge: off",
+                "type": "Text"
+              }
+            }
+          ]
+        },
+        "48": {
+          "type": "button",
+          "name": "castPerfMode",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "Experimental performance mode: off",
+                "type": "Text"
+              }
+            }
+          ]
         }
       }
     },

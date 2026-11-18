@@ -162,6 +162,27 @@ class CastControl extends EventEmitter {
         const c = this.carplayCentre();
         return 'CarPlay: centre the map: ' + (c.on ? 'on' : 'off') + (c.pending ? ' (' + c.pending + ')' : '');
     }
+    /* Cast to cluster 0.4.2: the car's badge over the map while no route
+     * (status.badge: { show, shown, route, why }) and the experimental
+     * performance mode (status.perf: { on, note }); an older tool has neither */
+    hasBadge() { return !!(this.status && this.status.badge); }
+    showBadge() { return !!(this.hasBadge() && this.status.badge.show); }
+    setShowBadge(on) { return this._send({ cmd: 'showBadge', on: !!on }); }
+    badgeText() {
+        if (!this.status) return "Show the car's badge: -";
+        if (!this.hasBadge()) return "Show the car's badge: needs Cast to cluster 0.4.2";
+        const b = this.status.badge;
+        if (!b.show) return "Show the car's badge: off";
+        return "Show the car's badge: on - " + (b.shown ? 'shown (no route)' : 'map over it (a route)');
+    }
+    hasPerf() { return !!(this.status && this.status.perf); }
+    perfMode() { return !!(this.hasPerf() && this.status.perf.on); }
+    setPerfMode(on) { return this._send({ cmd: 'perfMode', on: !!on }); }
+    perfText() {
+        if (!this.status) return 'Experimental performance mode: -';
+        if (!this.hasPerf()) return 'Experimental performance mode: needs Cast to cluster 0.4.2';
+        return 'Experimental performance mode: ' + (this.perfMode() ? 'on' : 'off');
+    }
     /* the cluster cards: { directions, eta, url, pending } */
     carplayCards() { return (this.status && this.status.carplay && this.status.carplay.cards) || null; }
     cardText(which) {

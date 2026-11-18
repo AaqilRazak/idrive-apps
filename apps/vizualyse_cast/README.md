@@ -38,6 +38,8 @@ One `LT_State_Wide` page, all of it usable with the iDrive controller:
 | CarPlay map: zoom in / zoom out | zooms the cluster map, while the CarPlay picture plays |
 | CarPlay: centre the map: on / off | the phone centres the car between the directions card (top) and the time / distance card (bottom), a safe area through hook111; off: Maps' own layout; switches at once; on by default |
 | CarPlay HUD alternate mode: on / off | on the HUD, the wide picture that fills its band, not centred; off (the default): the cluster's centred picture, fitted into the band; disabled without hook111 |
+| Show the car's badge: on / off | (0.4.2) on: the model badge over the map while no route; during a route the CarPlay map (and its directions card) over it, never BMW's turn box; the row says which (`shown (no route)` / `map over it (a route)`); off (the default): as the cluster renderer decides. Needs Cast to cluster 0.4.2 |
+| Experimental performance mode: on / off | (0.4.2) the CarPlay picture with every frame, and started again by itself after a start, a stall or the car's own map taking the cluster back (Cast to cluster's README); off (the default). Needs Cast to cluster 0.4.2 |
 | CarPlay map on the cluster / on the HUD | CarPlay's own second screen (its cluster map) on the cluster map or the HUD; enabled while hook111 is armed and ready (the tool's `carplay.ready`) |
 | Play last on the cluster map / the HUD / this screen | plays the last stream the phone started again (its URL stays in the tool); this screen needs mgu-render and is hidden without it |
 | QR code on the cluster | the tool's idle QR code on the cluster on or off (off by default: the cluster's navigation list covers it) |
@@ -87,8 +89,8 @@ writes the page's application.xml and uiDescription.json from one list.
 ```sh
 node tools/build.js          # the source package; the unit builds the app
 node tools/test_page.js      # the page against a fake SDK and HMI and the tool's real control socket
-node tools/make_page.js vizualyse_cast@0.4.1
-node tools/make_icon.js vizualyse_cast@0.4.1/rhmiData/variantGroups/Common/images/vizualyse_cast_icon.png
+node tools/make_page.js vizualyse_cast@0.4.2
+node tools/make_icon.js vizualyse_cast@0.4.2/rhmiData/variantGroups/Common/images/vizualyse_cast_icon.png
 ```
 
 The structure (SDK use, tile, visibility, the QR handles) follows
